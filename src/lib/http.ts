@@ -11,7 +11,9 @@ export type ApiErrorCode =
   | "internal_error";
 
 export function ok<T>(data: T, init?: ResponseInit) {
-  return NextResponse.json({ ok: true, data }, init);
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "private, no-store");
+  return NextResponse.json({ ok: true, data }, { ...init, headers });
 }
 
 export function fail(
@@ -20,7 +22,17 @@ export function fail(
   status = 400,
   details?: unknown,
 ) {
-  return NextResponse.json({ ok: false, error: { code, message, details } }, { status });
+  return NextResponse.json({ ok: false, error: { code, message, details } }, {
+    status, headers: { "Cache-Control": "private, no-store" },
+  });
+}
+
+export async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    throw new ApiError("validation_error", "Request body must be valid JSON", 422);
+  }
 }
 
 /** Wrap a route handler so thrown errors become clean JSON responses. */
