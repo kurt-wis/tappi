@@ -1,25 +1,52 @@
-cat > .gitignore << 'EOF'
-# deps
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
 
-# next
+# Next.js
 .next/
 out/
 build/
+dist/
 
-# env — NEVER commit these
+# Environment — NEVER COMMIT
 .env
-.env.local
 .env*.local
+.env.local
 
-# supabase
+# Supabase
 supabase/.temp/
 supabase/.branches/
+supabase/.env
 
-# editor / os
+# Test artifacts / scratch files (used during manual API testing)
+cookies*.txt
+signup*.json
+login.json
+member*.json
+link-card.json
+replace-card.json
+import*.json
+import*.csv
+members-export.csv
+
+# OS / editor
 .DS_Store
-*.log
-EOF
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
 
-# typescript build cache
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vercel
+.vercel
+
+# TypeScript
 *.tsbuildinfo
+next-env.d.ts
