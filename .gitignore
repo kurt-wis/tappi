@@ -22,4 +22,5 @@ supabase/.branches/
 EOF
 
 # typescript build cache
-*.tsbuildinfo
+*.tsbuildinfocookies.txt
+next-env.d.ts
