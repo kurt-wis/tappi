@@ -25,6 +25,21 @@ export type Member = {
   status: MemberStatus;
   card_uid: CardUid | null;
   card_linked_at: string | null;
+  /** Only populated on responses from the card-linking endpoints; omitted from generic member CRUD. */
+  card_linked_by?: string | null;
+  created_at: string;
+};
+
+export type CardLinkAction = "link" | "relink" | "unlink";
+
+export type CardLinkAudit = {
+  id: string;
+  org_id: string;
+  member_id: string;
+  old_uid: CardUid | null;
+  new_uid: CardUid | null;
+  action: CardLinkAction;
+  officer_id: string | null;
   created_at: string;
 };
 
