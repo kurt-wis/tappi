@@ -1,0 +1,22 @@
+cat > .gitignore << 'EOF'
+# deps
+node_modules/
+
+# next
+.next/
+out/
+build/
+
+# env — NEVER commit these
+.env
+.env.local
+.env*.local
+
+# supabase
+supabase/.temp/
+supabase/.branches/
+
+# editor / os
+.DS_Store
+*.log
+EOF
