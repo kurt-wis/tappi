@@ -19,7 +19,7 @@ supabase/.temp/
 supabase/.branches/
 supabase/.env
 
-# Test artifacts / scratch files (used during manual API testing)
+# Test artifacts / scratch files
 cookies*.txt
 signup*.json
 login.json

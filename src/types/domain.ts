@@ -57,7 +57,23 @@ export type Event = {
   status: EventStatus;
   points_value: number;
   certificate_enabled: boolean;
+  published_at: string | null;
+  cancelled_at: string | null;
+  created_by: string | null;
   created_at: string;
+  updated_at: string;
+};
+
+/** One row of an event's master list (expected attendees), as returned to the API layer. */
+export type EventMasterListEntry = {
+  member_id: string;
+  added_at: string;
+  added_by: string | null;
+};
+
+/** listMasterList's shape: a master-list row with its member embedded via the Supabase FK join. */
+export type EventMasterListEntryWithMember = EventMasterListEntry & {
+  members: Pick<Member, "id" | "full_name" | "student_number" | "email" | "course" | "member_role" | "status">;
 };
 
 export type Attendance = {
