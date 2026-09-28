@@ -16,6 +16,18 @@ export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json({ ok: true, data }, { ...init, headers });
 }
 
+/** A downloadable export (CSV/PDF) instead of the { ok, data } envelope. */
+export function download(file: { filename: string; contentType: string; body: string | Uint8Array }) {
+  return new Response(file.body as BodyInit, {
+    status: 200,
+    headers: {
+      "Content-Type": file.contentType,
+      "Content-Disposition": `attachment; filename="${file.filename}"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
 export function fail(
   code: ApiErrorCode,
   message: string,
@@ -30,6 +42,17 @@ export function fail(
 export async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
+  } catch {
+    throw new ApiError("validation_error", "Request body must be valid JSON", 422);
+  }
+}
+
+/** Like readJson, but an empty body is {}. Malformed JSON is still a 422, never silently {}. */
+export async function readOptionalJson(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (text.trim() === "") return {};
+  try {
+    return JSON.parse(text);
   } catch {
     throw new ApiError("validation_error", "Request body must be valid JSON", 422);
   }

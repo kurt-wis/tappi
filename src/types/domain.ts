@@ -97,3 +97,69 @@ export type ScanResult =
   | { outcome: "duplicate"; member: Pick<Member, "id" | "full_name" | "student_number">; first_seen_at: string }
   | { outcome: "unknown_card"; card_uid: CardUid }
   | { outcome: "not_on_master_list"; member: Pick<Member, "id" | "full_name" | "student_number"> };
+/** points_ledger row. Credits = sum of points; finalize writes reason "event_attendance". */
+export type CreditEntry = {
+  id: string;
+  member_id: string;
+  event_id: string | null;
+  points: number;
+  reason: string;
+  awarded_by: string | null;
+  created_at: string;
+};
+
+export type Certificate = {
+  id: string;
+  org_id: string;
+  event_id: string;
+  member_id: string;
+  code: string;
+  issued_by: string | null;
+  issued_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  revoke_reason: string | null;
+};
+
+/** Attendance report rows include master-list members who haven't tapped into a live event yet. */
+export type ReportAttendanceStatus = AttendanceStatus | "not_scanned";
+
+export type AttendanceReportRow = {
+  event_id: string;
+  event_title: string;
+  event_starts_at: string;
+  event_status: EventStatus;
+  member_id: string;
+  student_number: string;
+  full_name: string;
+  course: string | null;
+  status: ReportAttendanceStatus;
+  time_in: string | null;
+  time_out: string | null;
+  method: ScanMethod | null;
+  certificate_eligible: boolean;
+  certificate_id: string | null;
+  certificate_code: string | null;
+  certificate_revoked_at: string | null;
+};
+
+/** Per-member credits + Tappies (consecutive attended events) + attendance counts. */
+export type MemberSummary = {
+  member_id: string;
+  student_number: string;
+  full_name: string;
+  course: string | null;
+  status: MemberStatus;
+  credits: number;
+  present: number;
+  late: number;
+  walk_in: number;
+  absent: number;
+  /** present + late + walk_in */
+  attended: number;
+  /** attended / (attended + absent), or null when the member has no completed-event history. */
+  attendance_rate: number | null;
+  current_tappies: number;
+  longest_tappies: number;
+  certificates_issued: number;
+};
