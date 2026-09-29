@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({ createServerClient: vi.fn() }));
 vi.mock("@supabase/ssr", () => ({ createServerClient: mocks.createServerClient }));
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 
 type CookieBridge = { getAll: () => unknown[]; setAll: (values: { name: string; value: string; options?: object }[]) => void };
 let cookieBridge: CookieBridge;
@@ -26,7 +26,7 @@ test("refresh updates request and response cookies and preserves multiple cookie
     cookieBridge.setAll([{ name: "second", value: "fresh-too" }]);
     return { data: { user: { id: "user-1" } }, error: null };
   });
-  const response = await middleware(request);
+  const response = await proxy(request);
   expect(request.cookies.get("session")?.value).toBe("fresh");
   expect(response.cookies.get("session")?.value).toBe("fresh");
   expect(response.cookies.get("second")?.value).toBe("fresh-too");
@@ -38,7 +38,7 @@ test("missing session redirects a protected page while preserving cookie cleanup
     cookieBridge.setAll([{ name: "session", value: "", options: { maxAge: 0 } }]);
     return { data: { user: null }, error: null };
   });
-  const response = await middleware(new NextRequest("http://localhost/dashboard?tab=members"));
+  const response = await proxy(new NextRequest("http://localhost/dashboard?tab=members"));
   expect(response.status).toBe(307);
   const location = new URL(response.headers.get("location")!);
   expect(location.pathname).toBe("/login");
@@ -51,19 +51,19 @@ test("expired sessions get API 401 with cookie cleanup preserved", async () => {
     cookieBridge.setAll([{ name: "session", value: "", options: { maxAge: 0 } }]);
     return { data: { user: null }, error: { message: "expired" } };
   });
-  const response = await middleware(new NextRequest("http://localhost/api/members"));
+  const response = await proxy(new NextRequest("http://localhost/api/members"));
   expect(response.status).toBe(401);
   expect((await response.json()).error.code).toBe("unauthorized");
   expect(response.cookies.get("session")?.maxAge).toBe(0);
 });
 
 test.each(["/api/auth/login", "/api/auth/me", "/api/public/events", "/login", "/signup"])("public path %s bypasses middleware authentication", async (path) => {
-  expect((await middleware(new NextRequest(`http://localhost${path}`))).status).toBe(200);
+  expect((await proxy(new NextRequest(`http://localhost${path}`))).status).toBe(200);
   expect(mocks.createServerClient).not.toHaveBeenCalled();
 });
 
 test.each(["/api/authentication", "/api/publicity"])("similar path prefix %s cannot bypass authentication", async (path) => {
   getUser.mockResolvedValue({ data: { user: null }, error: null });
-  expect((await middleware(new NextRequest(`http://localhost${path}`))).status).toBe(401);
+  expect((await proxy(new NextRequest(`http://localhost${path}`))).status).toBe(401);
   expect(getUser).toHaveBeenCalledOnce();
 });

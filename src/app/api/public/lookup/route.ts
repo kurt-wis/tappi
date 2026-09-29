@@ -39,6 +39,7 @@ export const POST = handler(async (req: Request) => {
     .from("events")
     .select("id, org_id")
     .eq("id", eventId)
+    .returns<{ id: string; org_id: string }[]>()
     .maybeSingle();
 
   if (!event) return ok({ found: false });
@@ -48,6 +49,7 @@ export const POST = handler(async (req: Request) => {
     .select("id, full_name, email")
     .eq("org_id", event.org_id)
     .eq("student_number", normalized)
+    .returns<{ id: string; full_name: string; email: string | null }[]>()
     .maybeSingle();
 
   if (!member || !member.email) return ok({ found: false });
