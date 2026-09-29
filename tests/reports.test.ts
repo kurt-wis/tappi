@@ -96,7 +96,7 @@ describe("attendanceReport", () => {
     if (result.kind !== "file") throw new Error("expected a file");
     expect(result.file.contentType).toBe("text/csv; charset=utf-8");
     const [header, line] = String(result.file.body).trim().split("\r\n");
-    expect(header).toBe("event_title,event_starts_at,student_number,full_name,course,status,time_in,method,certificate_eligible,certificate_code");
+    expect(header).toBe("event_title,event_starts_at,student_number,full_name,course,status,time_in,time_out,method,certificate_eligible,certificate_code");
     expect(line).toContain('"Orientation, Day 1"');
     expect(line).toContain("AAAA-BBBB-CCCC-DDDD (revoked)");
   });

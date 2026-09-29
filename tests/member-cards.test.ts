@@ -80,16 +80,17 @@ describe("linkCard", () => {
 describe("replaceCard", () => {
   it("rejects non-officers", async () => {
     const { ctx } = context([], 200, "scanner_operator");
-    await expect(replaceCard(ctx, id, { new_card_uid: "123" })).rejects.toMatchObject({ status: 403 });
+    await expect(replaceCard(ctx, id, { new_card_uid: "123", reason: "lost card" })).rejects.toMatchObject({ status: 403 });
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("calls replace_member_card and returns the updated member", async () => {
     mocks.rpc.mockResolvedValue({ data: { ...memberRow, card_uid: "999" }, error: null });
     const { ctx } = context();
-    const result = await replaceCard(ctx, id, { new_card_uid: "999" });
+    const result = await replaceCard(ctx, id, { new_card_uid: "999", reason: "damaged card" });
     expect(mocks.rpc).toHaveBeenCalledWith("replace_member_card", {
       p_org_id: orgId, p_member_id: id, p_new_card_uid: "999", p_officer_id: userId,
+      p_reason: "damaged card",
     });
     expect(result.card_uid).toBe("999");
   });
@@ -97,13 +98,13 @@ describe("replaceCard", () => {
   it("maps a no-card RPC error to 409", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: "TP002", message: "Member has no linked card" } });
     const { ctx } = context();
-    await expect(replaceCard(ctx, id, { new_card_uid: "123" })).rejects.toMatchObject({ status: 409 });
+    await expect(replaceCard(ctx, id, { new_card_uid: "123", reason: "lost card" })).rejects.toMatchObject({ status: 409 });
   });
 
   it("maps a not-found RPC error to 404", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: "TP003", message: "Member not found" } });
     const { ctx } = context();
-    await expect(replaceCard(ctx, id, { new_card_uid: "123" })).rejects.toMatchObject({ status: 404 });
+    await expect(replaceCard(ctx, id, { new_card_uid: "123", reason: "lost card" })).rejects.toMatchObject({ status: 404 });
   });
 });
 

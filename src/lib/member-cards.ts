@@ -10,7 +10,10 @@ import type { CardLinkAudit, Member } from "@/types/domain";
 export const cardUid = z.string().trim().regex(/^\d+$/, "card_uid must be a decimal digit string").min(1).max(32);
 
 export const linkCardSchema = z.object({ card_uid: cardUid }).strict();
-export const replaceCardSchema = z.object({ new_card_uid: cardUid }).strict();
+export const replaceCardSchema = z.object({
+  new_card_uid: cardUid,
+  reason: z.string().trim().min(1).max(500),
+}).strict();
 
 const cardHistoryColumns = "id,org_id,member_id,old_uid,new_uid,action,officer_id,created_at";
 
@@ -68,13 +71,14 @@ export async function linkCard(ctx: AuthContext, id: string, input: unknown): Pr
 export async function replaceCard(ctx: AuthContext, id: string, input: unknown): Promise<Member> {
   requireRole(ctx, ["officer"]);
   memberId.parse(id);
-  const { new_card_uid } = replaceCardSchema.parse(input);
+  const { new_card_uid, reason } = replaceCardSchema.parse(input);
 
   const { data, error } = await supabaseAdmin().rpc("replace_member_card", {
     p_org_id: ctx.orgId,
     p_member_id: id,
     p_new_card_uid: new_card_uid,
     p_officer_id: ctx.userId,
+    p_reason: reason,
   });
   if (error) throwForCardRpcError(error);
   if (!data) throw ApiError.notFound("Member not found");

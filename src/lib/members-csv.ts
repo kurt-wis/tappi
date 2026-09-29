@@ -69,8 +69,8 @@ export function toCsv(rows: string[][]): string {
 // ---------------------------------------------------------------
 
 export type ImportRowResult =
-  | { row: number; student_number: string; result: "created" }
-  | { row: number; student_number: string; result: "updated" }
+  | { row: number; student_number: string | null; result: "created" }
+  | { row: number; student_number: string | null; result: "updated" }
   | { row: number; student_number: string | null; result: "skipped"; reason: string };
 
 export type ImportSummary = {

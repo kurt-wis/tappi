@@ -1,10 +1,12 @@
 import { handler, ok, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { resolveFormSchema, type FormField } from "@/lib/registration-form";
 
 type Context = { params: Promise<{ id: string }> };
 
 type PublicEvent = {
   id: string;
+  org_id: string;
   title: string;
   description: string | null;
   venue: string | null;
@@ -34,7 +36,7 @@ export const GET = handler(async (_request: Request, route: Context) => {
   const { data: event } = await admin
     .from("events")
     .select(
-      "id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots," +
+      "id,org_id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots," +
       "walk_in_policy,status,certificate_enabled,points_value",
     )
     .eq("id", id)
@@ -52,18 +54,22 @@ export const GET = handler(async (_request: Request, route: Context) => {
     .eq("event_id", id)
     .in("status", ["pending", "approved"]);
 
-  const { data: eventExtras } = await admin
-    .from("event_form_fields")
-    .select("key,label,type,required,options,position")
-    .eq("event_id", id)
-    .order("position")
-    .returns<EventField[]>();
+  const [{ data: orgDefaults }, { data: eventExtras }] = await Promise.all([
+    admin.from("org_form_fields").select("key,label,type,required,options,position")
+      .eq("org_id", event.org_id).order("position").returns<EventField[]>(),
+    admin.from("event_form_fields").select("key,label,type,required,options,position")
+      .eq("event_id", id).order("position").returns<EventField[]>(),
+  ]);
 
   const taken = regCount ?? 0;
+  const { org_id: _orgId, ...publicEvent } = event;
   return ok({
-    ...event,
+    ...publicEvent,
     registrations_count: taken,
     slots_remaining: event.slots !== null ? Math.max(0, event.slots - taken) : null,
-    event_extras: eventExtras ?? [],
+    form_fields: resolveFormSchema(
+      (orgDefaults ?? []).map((field) => ({ ...field, source: "org_default" })) as FormField[],
+      (eventExtras ?? []).map((field) => ({ ...field, source: "event_extra" })) as FormField[],
+    ),
   });
-}); 
+});

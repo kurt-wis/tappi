@@ -73,86 +73,14 @@ export async function reviewRegistration(
   uuid.parse(registrationId);
   const { action } = approveSchema.parse(input);
 
-  const admin = supabaseAdmin();
-
-  const { data: reg } = await admin
-    .from("registrations")
-    .select("id,event_id,org_id,member_id,student_number,status")
-    .eq("id", registrationId)
-    .eq("org_id", ctx.orgId)
-    .returns<RegistrationRow[]>()
-    .maybeSingle();
-
-  if (!reg) throw ApiError.notFound("Registration not found");
-  if (reg.status !== "pending") {
-    throw ApiError.conflict("This registration has already been reviewed");
-  }
-
-  const newStatus = action === "approve" ? "approved" : "denied";
-
-  const { data: updated, error: uErr } = await admin
-    .from("registrations")
-    .update({
-      status: newStatus,
-      reviewed_by: ctx.userId,
-      reviewed_at: new Date().toISOString(),
-    })
-    .eq("id", registrationId)
-    .select("*")
-    .returns<RegistrationRow[]>()
-    .single();
-
-  if (uErr) throw uErr;
-
-  // Per PDF: on approval of a non-directory person, the system
-  // automatically creates a lightweight directory entry using the
-  // details they provided. If a member already exists for this
-  // (org, student_number), link to it instead.
-  if (action === "approve" && !reg.member_id) {
-    const { data: existingMember } = await admin
-      .from("members")
-      .select("id")
-      .eq("org_id", ctx.orgId)
-      .eq("student_number", reg.student_number)
-      .returns<{ id: string }[]>()
-      .maybeSingle();
-
-    let memberId = existingMember?.id;
-
-    if (!memberId) {
-      const { data: reg2 } = await admin
-        .from("registrations")
-        .select("full_name,email,student_number")
-        .eq("id", registrationId)
-        .returns<{ full_name: string; email: string | null; student_number: string }[]>()
-        .single();
-
-      if (reg2) {
-        const { data: created, error: cErr } = await admin
-          .from("members")
-          .insert({
-            org_id: ctx.orgId,
-            student_number: reg2.student_number,
-            full_name: reg2.full_name,
-            email: reg2.email,
-            member_role: "attendee",
-            status: "active",
-          })
-          .select("id")
-          .returns<{ id: string }[]>()
-          .single();
-        if (cErr) throw cErr;
-        memberId = created?.id;
-      }
-    }
-
-    if (memberId) {
-      await admin
-        .from("registrations")
-        .update({ member_id: memberId })
-        .eq("id", registrationId);
-    }
-  }
-
-  return updated;
+  const { data, error } = await supabaseAdmin().rpc("review_registration", {
+    p_org_id: ctx.orgId,
+    p_registration_id: registrationId,
+    p_action: action,
+    p_officer_id: ctx.userId,
+  });
+  if (error?.code === "TP053") throw ApiError.notFound("Registration not found");
+  if (error?.code === "TP054") throw ApiError.conflict("This registration has already been reviewed");
+  if (error) throw error;
+  return data as RegistrationRow;
 }

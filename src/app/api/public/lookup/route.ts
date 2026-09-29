@@ -54,12 +54,19 @@ export const POST = handler(async (req: Request) => {
 
   if (!member || !member.email) return ok({ found: false });
 
+  const { data: person } = await admin.from("members").select("person_id")
+    .eq("id", member.id).single();
+  if (!person?.person_id) return ok({ found: false });
+
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   const otpHash = hashCode(otp);
 
   const { data: session, error: sErr } = await admin
     .from("registration_lookup_sessions")
     .insert({
+      event_id: eventId,
+      org_id: event.org_id,
+      person_id: person.person_id,
       student_number_normalized: normalized,
       masked_first_name: maskName(member.full_name),
       masked_email: maskEmail(member.email),

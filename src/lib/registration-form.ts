@@ -57,5 +57,5 @@ export function buildAnswersSchema(fields: FormField[]): z.ZodTypeAny {
 }
 
 export function normalizeStudentNumber(s: string): string {
-  return s.replace(/[-\s]/g, "").trim();
+  return s.replace(/[-\s]/g, "").trim().toUpperCase();
 }

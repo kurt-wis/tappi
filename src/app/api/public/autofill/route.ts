@@ -21,6 +21,7 @@ export const POST = handler(async (req: Request) => {
     .select("*")
     .eq("autofill_token_hash", hashCode(autofillToken))
     .eq("verified", true)
+    .eq("event_id", eventId)
     .maybeSingle();
 
   if (!session) throw ApiError.notFound("Invalid token");
@@ -33,12 +34,13 @@ export const POST = handler(async (req: Request) => {
     .eq("id", eventId)
     .maybeSingle();
   if (!event) throw ApiError.notFound("Event not found");
+  if (session.org_id !== event.org_id) throw ApiError.notFound("Invalid token");
 
   const { data: member } = await admin
     .from("members")
     .select("id, full_name, email, student_number, course")
     .eq("org_id", event.org_id)
-    .eq("student_number", session.student_number_normalized)
+    .eq("person_id", session.person_id)
     .maybeSingle();
   if (!member) throw ApiError.notFound("Member not found");
 

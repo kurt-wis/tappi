@@ -35,6 +35,8 @@ function throwForScanRpcError(error: PgError): never {
       throw ApiError.conflict("Walk-ins require approval for this event");
     case "TP025":
       throw ApiError.conflict("Member is not active");
+    case "TP026":
+      throw ApiError.conflict("This card has been reported lost or revoked");
     default:
       throw error;
   }
@@ -54,6 +56,16 @@ export async function recordScan(ctx: AuthContext, input: unknown): Promise<Atte
     p_client_scan_id: parsed.client_scan_id ?? null,
     p_method: "tap",
   });
+  if (error?.code === "TP026") {
+    await supabaseAdmin().from("audit_logs").insert({
+      org_id: ctx.orgId,
+      actor_id: ctx.userId,
+      action: "revoked_card_scan_rejected",
+      entity: "card",
+      entity_id: parsed.card_uid,
+      metadata: { event_id: parsed.event_id, device_id: parsed.device_id ?? null },
+    });
+  }
   if (error) throwForScanRpcError(error);
   if (!data) throw new Error("record_scan returned no row");
   return data as Attendance;

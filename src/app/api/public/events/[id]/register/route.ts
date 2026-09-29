@@ -2,7 +2,7 @@ import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { createHash } from "crypto";
-import { normalizeStudentNumber } from "@/lib/registration-form";
+import { buildAnswersSchema, normalizeStudentNumber, type FormField } from "@/lib/registration-form";
 
 const bodySchema = z.object({
   full_name: z.string().trim().min(1).max(200),
@@ -22,12 +22,12 @@ type EventRow = {
   walk_in_policy: string;
 };
 
-type MemberRow = { id: string };
-
 type SessionRow = {
   verified: boolean;
   autofill_token_expires_at: string | null;
   student_number_normalized: string;
+  event_id: string;
+  org_id: string;
 };
 
 type RegistrationRow = {
@@ -52,21 +52,13 @@ export const POST = handler(async (request: Request, route: Context) => {
   if (!event) throw ApiError.notFound("Event not found");
   if (event.status !== "published") throw ApiError.conflict("Event is not open for registration");
 
-  if (event.slots !== null) {
-    const { count } = await admin
-      .from("registrations")
-      .select("id", { count: "exact", head: true })
-      .eq("event_id", eventId)
-      .in("status", ["pending", "approved"]);
-    if ((count ?? 0) >= event.slots) throw ApiError.conflict("Event is full");
-  }
-
   let autofillUsed = false;
+  let consumedTokenHash: string | null = null;
   if (body.autofillToken) {
     const tokenHash = createHash("sha256").update(body.autofillToken).digest("hex");
     const { data: session } = await admin
       .from("registration_lookup_sessions")
-      .select("verified,autofill_token_expires_at,student_number_normalized")
+      .select("verified,autofill_token_expires_at,student_number_normalized,event_id,org_id")
       .eq("autofill_token_hash", tokenHash)
       .returns<SessionRow[]>()
       .maybeSingle();
@@ -74,85 +66,50 @@ export const POST = handler(async (request: Request, route: Context) => {
     if (
       session?.verified &&
       session.student_number_normalized === normalized &&
+      session.event_id === eventId &&
+      session.org_id === event.org_id &&
       session.autofill_token_expires_at &&
       new Date(session.autofill_token_expires_at) > new Date()
     ) {
       autofillUsed = true;
-      await admin
-        .from("registration_lookup_sessions")
-        .update({ autofill_token_hash: null, autofill_token_expires_at: null })
-        .eq("autofill_token_hash", tokenHash);
+      consumedTokenHash = tokenHash;
     }
   }
 
-  const { data: existing } = await admin
-    .from("members")
-    .select("id")
-    .eq("org_id", event.org_id)
-    .eq("student_number", normalized)
-    .returns<MemberRow[]>()
-    .maybeSingle();
+  const [{ data: orgFields }, { data: eventFields }] = await Promise.all([
+    admin.from("org_form_fields").select("key,label,type,required,options,position")
+      .eq("org_id", event.org_id).order("position"),
+    admin.from("event_form_fields").select("key,label,type,required,options,position")
+      .eq("event_id", eventId).order("position"),
+  ]);
+  const answers = buildAnswersSchema([
+    ...((orgFields ?? []).map((field) => ({ ...field, source: "org_default" })) as FormField[]),
+    ...((eventFields ?? []).map((field) => ({ ...field, source: "event_extra" })) as FormField[]),
+  ]).parse(body.answers);
 
-  let memberId: string;
-  if (existing) {
-    memberId = existing.id;
-  } else {
-    const { data: created, error: cErr } = await admin
-      .from("members")
-      .insert({
-        org_id: event.org_id,
-        student_number: normalized,
-        full_name: body.full_name,
-        email: body.email,
-        member_role: "attendee",
-        status: "active",
-      })
-      .select("id")
-      .returns<MemberRow[]>()
-      .single();
-
-    if (cErr) {
-      if (cErr.code === "23505") {
-        const { data: retry } = await admin
-          .from("members")
-          .select("id")
-          .eq("org_id", event.org_id)
-          .eq("student_number", normalized)
-          .returns<MemberRow[]>()
-          .maybeSingle();
-        if (!retry) throw cErr;
-        memberId = retry.id;
-      } else {
-        throw cErr;
-      }
-    } else {
-      memberId = created!.id;
-    }
-  }
-
-  const { data: reg, error: rErr } = await admin
-    .from("registrations")
-    .insert({
-      event_id: eventId,
-      org_id: event.org_id,
-      member_id: memberId,
-      full_name: body.full_name,
-      student_number: normalized,
-      email: body.email,
-      answers: body.answers,
-      autofill_used: autofillUsed,
-      source: "public_form",
-      status: "pending",
-    })
-    .select("id,status,created_at")
-    .returns<RegistrationRow[]>()
-    .single();
+  const { data: reg, error: rErr } = await admin.rpc("register_for_event", {
+    p_event_id: eventId,
+    p_full_name: body.full_name,
+    p_student_number: normalized,
+    p_email: body.email,
+    p_answers: answers,
+    p_autofill_used: autofillUsed,
+  });
 
   if (rErr) {
     if (rErr.code === "23505") {
       throw ApiError.conflict("You are already registered for this event");
     }
+    if (rErr.code === "TP050") throw ApiError.notFound("Event not found");
+    if (rErr.code === "TP051") throw ApiError.conflict("Event is not open for registration");
+    if (rErr.code === "TP052") throw ApiError.conflict("Event is full");
     throw rErr;
+  }
+
+  if (consumedTokenHash) {
+    await admin.from("registration_lookup_sessions")
+      .update({ autofill_token_hash: null, autofill_token_expires_at: null })
+      .eq("autofill_token_hash", consumedTokenHash);
   }
 
   return ok({ registration: reg, autofill_used: autofillUsed }, { status: 201 });

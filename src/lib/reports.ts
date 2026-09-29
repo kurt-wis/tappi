@@ -33,6 +33,7 @@ export const attendanceReportQuerySchema = z.object({
   to: isoDateTime.optional(),
   search: optionalText,
   course: optionalText,
+  committee: optionalText,
   format: reportFormat,
   ...pagination,
 }).strict();
@@ -93,6 +94,7 @@ const ATTENDANCE_COLUMNS: Array<PdfColumn & { key: keyof AttendanceReportRow; cs
   { key: "course", csv: "course", header: "Course", width: 1.1 },
   { key: "status", csv: "status", header: "Status", width: 1.2 },
   { key: "time_in", csv: "time_in", header: "Time in", width: 1.7 },
+  { key: "time_out", csv: "time_out", header: "Time out", width: 1.7 },
   { key: "method", csv: "method", header: "Method", width: 0.8 },
   { key: "certificate_eligible", csv: "certificate_eligible", header: "Eligible", width: 0.9 },
   { key: "certificate_code", csv: "certificate_code", header: "Certificate", width: 3 },
@@ -117,6 +119,7 @@ async function fetchAttendanceReport(
     p_to: query.to ?? null,
     p_search: query.search ?? null,
     p_course: query.course ?? null,
+    p_committee: query.committee ?? null,
     p_limit: limit,
     p_offset: offset,
   });
@@ -155,6 +158,7 @@ export async function attendanceReport(ctx: AuthContext, input: unknown): Promis
       ...row,
       event_starts_at: formatDateTime(row.event_starts_at),
       time_in: row.time_in ? formatDateTime(row.time_in) : null,
+      time_out: row.time_out ? formatDateTime(row.time_out) : null,
       certificate_eligible: (row.certificate_eligible ? "Yes" : "No") as never,
     })),
   });
@@ -264,6 +268,17 @@ export async function getMemberSummary(ctx: AuthContext, id: string): Promise<Me
   return rows[0];
 }
 
+export async function tappiesLeaderboard(ctx: AuthContext, limit = 100) {
+  requireRole(ctx, ["officer"]);
+  const parsedLimit = z.coerce.number().int().min(1).max(500).parse(limit);
+  const { data, error } = await supabaseAdmin().rpc("tappies_leaderboard", {
+    p_org_id: ctx.orgId,
+    p_limit: parsedLimit,
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
 // ---------------------------------------------------------------
 // Shared formatting
 // ---------------------------------------------------------------
@@ -276,7 +291,7 @@ function formatDateTime(iso: string): string {
 function describeFilters(query: Record<string, unknown>): string {
   const parts: string[] = [];
   const labels: Record<string, string> = {
-    event_id: "Event", status: "Status", from: "From", to: "To", search: "Search", course: "Course",
+    event_id: "Event", status: "Status", from: "From", to: "To", search: "Search", course: "Course", committee: "Committee",
   };
   for (const [key, label] of Object.entries(labels)) {
     const value = query[key];

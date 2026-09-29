@@ -5,6 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
 export function isPublicPath(pathname: string): boolean {
   return pathname === "/login" || pathname === "/signup" ||
     pathname === "/api/auth" || pathname.startsWith("/api/auth/") ||
+    pathname === "/api/cron" || pathname.startsWith("/api/cron/") ||
     pathname === "/api/public" || pathname.startsWith("/api/public/");
 }
 
