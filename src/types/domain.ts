@@ -17,7 +17,7 @@ export type CardUid = string;
 export type Member = {
   id: string;
   org_id: string;
-  student_number: string;
+  student_number: string | null;
   full_name: string;
   email: string | null;
   course: string | null;
@@ -143,7 +143,7 @@ export type AttendanceReportRow = {
   certificate_revoked_at: string | null;
 };
 
-/** Per-member credits + Tappies (consecutive attended events) + attendance counts. */
+/** Per-member credits + lifetime Tappies + attendance counts. */
 export type MemberSummary = {
   member_id: string;
   student_number: string;

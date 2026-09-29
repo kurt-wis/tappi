@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AuthContext } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
+import { normalizeStudentNumber } from "@/lib/registration-form";
 
 export const memberColumns = "id,org_id,full_name,student_number,email,course,member_role,card_uid,card_linked_at,status,created_at";
 const text = z.string().trim().min(1).max(200);
@@ -10,7 +11,8 @@ const optionalCourse = text.nullable().optional();
 export const memberStatus = z.enum(["active", "inactive", "archived"]);
 export const memberId = z.string().uuid();
 export const createMemberSchema = z.object({
-  student_number: text.max(100),
+  student_number: z.string().trim().min(1).max(100).nullable()
+    .transform((value) => value === null ? null : normalizeStudentNumber(value)),
   full_name: text,
   email: optionalEmail,
   course: optionalCourse,

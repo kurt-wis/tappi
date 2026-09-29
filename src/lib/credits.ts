@@ -21,11 +21,12 @@ export const adjustCreditsSchema = z.object({
     .refine((r) => r !== "event_attendance", "reason \"event_attendance\" is reserved for event finalization"),
 }).strict();
 
-async function assertMemberInOrg(ctx: AuthContext, id: string): Promise<void> {
-  const { data, error } = await ctx.supabase.from("members").select("id")
+async function assertMemberInOrg(ctx: AuthContext, id: string): Promise<{ person_id: string }> {
+  const { data, error } = await ctx.supabase.from("members").select("id,person_id")
     .eq("org_id", ctx.orgId).eq("id", id).maybeSingle();
   if (error) throw error;
   if (!data) throw ApiError.notFound("Member not found");
+  return { person_id: data.person_id as string };
 }
 
 /** Balance is summed over the whole ledger, not just the returned page. */
@@ -60,10 +61,10 @@ export async function adjustCredits(ctx: AuthContext, id: string, input: unknown
   requireRole(ctx, ["officer"]);
   memberIdSchema.parse(id);
   const { points, reason } = adjustCreditsSchema.parse(input);
-  await assertMemberInOrg(ctx, id);
+  const { person_id } = await assertMemberInOrg(ctx, id);
 
   const { data, error } = await supabaseAdmin().from("points_ledger")
-    .insert({ org_id: ctx.orgId, member_id: id, event_id: null, points, reason, awarded_by: ctx.userId })
+    .insert({ org_id: ctx.orgId, member_id: id, person_id, event_id: null, points, reason, awarded_by: ctx.userId })
     .select(creditColumns).single();
   if (error) throw error;
   return data as unknown as CreditEntry;

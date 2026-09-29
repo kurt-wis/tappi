@@ -98,7 +98,7 @@ describe("importMembers", () => {
   });
 
   it("creates new members and updates existing ones, keyed by student_number within the org", async () => {
-    const existing = new Set(["2026-0001"]);
+    const existing = new Set(["20260001"]);
     const { ctx, supabase } = context({
       onSelectMaybeSingle: (table, filters) => {
         expect(table).toBe("members");
@@ -124,8 +124,8 @@ describe("importMembers", () => {
       updated: 1,
       skipped: 0,
       rows: [
-        { row: 2, student_number: "2026-0001", result: "updated" },
-        { row: 3, student_number: "2026-0002", result: "created" },
+        { row: 2, student_number: "20260001", result: "updated" },
+        { row: 3, student_number: "20260002", result: "created" },
       ],
     });
 
@@ -135,7 +135,7 @@ describe("importMembers", () => {
     });
     const insertCall = supabase.calls.find((c) => c.op === "insert");
     expect(insertCall?.payload).toMatchObject({
-      student_number: "2026-0002", full_name: "New Student", email: null, course: null,
+      student_number: "20260002", full_name: "New Student", email: null, course: null,
       member_role: "officer", org_id: orgId,
     });
   });
