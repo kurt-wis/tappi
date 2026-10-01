@@ -1,4 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   cookieGet: vi.fn(() => [{ name: "session", value: "old" }]),
@@ -18,6 +19,7 @@ type CookieBridge = { getAll: () => unknown[]; setAll: (values: { name: string; 
 let cookieBridge: CookieBridge;
 let query: ReturnType<typeof makeQuery>;
 let auth: { signInWithPassword: ReturnType<typeof vi.fn>; signOut: ReturnType<typeof vi.fn>; getUser: ReturnType<typeof vi.fn> };
+let studentLogin: { person_id: string } | null = null;
 
 function makeQuery() {
   return {
@@ -29,6 +31,7 @@ function makeQuery() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  studentLogin = null;
   query = makeQuery();
   auth = {
     signInWithPassword: vi.fn(async () => {
@@ -43,7 +46,13 @@ beforeEach(() => {
   };
   mocks.createServerClient.mockImplementation((_url, _key, options) => {
     cookieBridge = options.cookies;
-    return { auth, from: vi.fn(() => query) };
+    return { auth, from: vi.fn((table: string) => {
+      if (table === "profiles") return query;
+      if (table === "logins") return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: studentLogin, error: null }) }) }) };
+      if (table === "organizations") return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: orgId, name: "Test Org" }, error: null }) }) }) };
+      if (table === "members") return { select: () => ({ eq: async () => ({ data: [], error: null }) }) };
+      throw new Error("Unexpected table " + table);
+    }) };
   });
 });
 
@@ -54,7 +63,7 @@ const loginRequest = () => new Request("http://localhost/api/auth/login", {
 test("login forwards Supabase cookies to the response cookie store and returns account context", async () => {
   const response = await login(loginRequest());
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ ok: true, data: { user_id: "user-1", org_id: orgId, role: "org_admin" } });
+  expect(await response.json()).toEqual({ ok: true, data: { user_id: "user-1", org_id: orgId, role: "org_admin", person_id: null } });
   expect(mocks.cookieSet).toHaveBeenCalledWith("session", "new", { httpOnly: true });
   expect(cookieBridge.getAll()).toEqual([{ name: "session", value: "old" }]);
 });
@@ -95,7 +104,22 @@ test("me returns the signed-in profile with organization", async () => {
   query.maybeSingle.mockResolvedValue({ data: profile, error: null });
   const response = await me();
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ ok: true, data: profile });
-  expect(query.eq).toHaveBeenCalledWith("org_id", orgId);
+  expect(await response.json()).toMatchObject({ ok: true, data: { ...profile, is_staff: true, is_student: false, profile } });
+  expect(query.eq).toHaveBeenCalledWith("id", "user-1");
   expect(response.headers.get("Cache-Control")).toContain("no-store");
+});
+
+test("students without organization profiles can log in and view account context", async () => {
+  query.maybeSingle.mockResolvedValue({ data: null, error: null });
+  studentLogin = { person_id: "student-person" };
+  const response = await login(loginRequest());
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ data: { role: "student", person_id: "student-person", org_id: null } });
+  const account = await me();
+  expect(await account.json()).toMatchObject({ data: { is_student: true, is_staff: false, members: [] } });
+});
+
+test("me rejects inactive staff profiles even with a valid session", async () => {
+  query.maybeSingle.mockResolvedValue({ data: { ...activeProfile, is_active: false }, error: null });
+  expect((await me()).status).toBe(403);
 });

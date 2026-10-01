@@ -3,13 +3,14 @@ import { ApiError } from "@/lib/http";
 import { requireRole, type AuthContext } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { Attendance } from "@/types/domain";
+import { cardUid } from "@/lib/member-cards";
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
 
 export const recordScanSchema = z.object({
   event_id: uuid,
-  card_uid: z.string().trim().min(1).max(100),
+  card_uid: cardUid,
   client_scan_id: z.string().trim().min(1).max(100).optional(),
   device_id: z.string().trim().min(1).max(100).optional(),
   scanned_at: isoDateTime.optional(),
@@ -42,7 +43,7 @@ function throwForScanRpcError(error: PgError): never {
   }
 }
 
-export async function recordScan(ctx: AuthContext, input: unknown): Promise<Attendance> {
+export async function recordScan(ctx: AuthContext, input: unknown, method: "tap" | "offline_sync" = "tap"): Promise<Attendance> {
   requireRole(ctx, ["officer", "scanner_operator"]);
   const parsed = recordScanSchema.parse(input);
 
@@ -54,7 +55,7 @@ export async function recordScan(ctx: AuthContext, input: unknown): Promise<Atte
     p_officer_id: ctx.userId,
     p_device_id: parsed.device_id ?? null,
     p_client_scan_id: parsed.client_scan_id ?? null,
-    p_method: "tap",
+    p_method: method,
   });
   if (error?.code === "TP026") {
     await supabaseAdmin().from("audit_logs").insert({
@@ -82,7 +83,10 @@ export async function recordScanBatch(ctx: AuthContext, input: unknown) {
   const results: BatchScanResult[] = [];
   for (let index = 0; index < scans.length; index++) {
     try {
-      const data = await recordScan(ctx, scans[index]);
+      if (!scans[index].client_scan_id || !scans[index].scanned_at) {
+        throw new ApiError("validation_error", "Offline scans require client_scan_id and scanned_at", 422);
+      }
+      const data = await recordScan(ctx, scans[index], "offline_sync");
       results.push({ index, ok: true, data });
     } catch (error) {
       if (error instanceof ApiError) {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ApiError } from "@/lib/http";
 
 export const signupSchema = z.object({
+  mode: z.literal("org").optional(),
   org_name: z.string().trim().min(1).max(200),
   org_slug: z.string().trim().toLowerCase().min(2).max(80)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers, and single hyphens"),
@@ -11,7 +12,6 @@ export const signupSchema = z.object({
   password: z.string().min(8).max(128),
 }).strict();
 
-/** Provision only server-owned identifiers and a fixed initial administrator role. */
 export async function signupOrganization(
   admin: SupabaseClient,
   input: z.infer<typeof signupSchema>,
@@ -56,8 +56,7 @@ export async function signupOrganization(
 
     return { user_id: userId, org_id: orgId, role: "org_admin" as const };
   } catch (error) {
-    // Both deletions cascade to a newly inserted profile. Never delete by a
-    // client-supplied slug/email: a conflict may refer to somebody else's rows.
+
     const cleanupErrors: unknown[] = [];
     if (orgId) {
       try {

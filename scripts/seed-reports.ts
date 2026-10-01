@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     throw new Error('Refusing to modify an organization not owned by the test seed.');
   }
   const { data: members, error: membersError } = await db.from('members')
-    .select('id, org_id, student_number').in('id', seedMembers.slice(0, 3).map((member) => member.id));
+    .select('id, org_id, student_number, person_id').in('id', seedMembers.slice(0, 3).map((member) => member.id));
   if (membersError) throw membersError;
   for (const member of seedMembers.slice(0, 3)) {
     if (!members?.some((row) => row.id === member.id && row.org_id === org.id && row.student_number === member.student_number)) {
@@ -34,14 +34,18 @@ async function main(): Promise<void> {
     { name: 'reports-event-1', title: 'Reports Test: Community Walk', starts_at: '2026-09-01T01:00:00Z', ends_at: '2026-09-01T03:00:00Z', points_value: 3, certificate_enabled: false },
     { name: 'reports-event-2', title: 'Reports Test: Leadership Workshop', starts_at: '2026-09-08T01:00:00Z', ends_at: '2026-09-08T03:00:00Z', points_value: 5, certificate_enabled: true },
   ];
+  const pendingEvents: string[] = [];
   for (const event of events) {
     const id = seedId(event.name);
     const { data: existing, error: lookupError } = await db.from('events')
-      .select('org_id, title').eq('id', id).maybeSingle();
+      .select('org_id, title, status').eq('id', id).maybeSingle();
     if (lookupError) throw lookupError;
     if (existing && (existing.org_id !== org.id || existing.title !== event.title)) {
       throw new Error(`Refusing to modify an unrelated event at ${id}.`);
     }
+    if (existing?.status === 'completed') continue;
+    if (existing && existing.status !== 'published') throw new Error('Seed event status was changed; refusing to modify it.');
+    pendingEvents.push(id);
     const { error } = await db.from('events').upsert({
       id, org_id: org.id, title: event.title, starts_at: event.starts_at,
       ends_at: event.ends_at, points_value: event.points_value,
@@ -53,10 +57,10 @@ async function main(): Promise<void> {
 
   const first = seedId(events[0].name);
   const second = seedId(events[1].name);
-  const masterList = [first, second].flatMap((event_id) =>
+  const masterList = pendingEvents.flatMap((event_id) =>
     seedMembers.slice(0, 2).map((member) => ({ event_id, member_id: member.id })));
-  const { error: masterError } = await db.from('event_master_list').upsert(masterList,
-    { onConflict: 'event_id,member_id', ignoreDuplicates: true });
+  const { error: masterError } = masterList.length ? await db.from('event_master_list').upsert(masterList,
+    { onConflict: 'event_id,member_id', ignoreDuplicates: true }) : { error: null };
   if (masterError) throw masterError;
 
   const attendance = [
@@ -64,12 +68,21 @@ async function main(): Promise<void> {
     { event_id: first, member_id: seedMembers[1].id, status: 'present', time_in: '2026-09-01T01:08:00Z' },
     { event_id: second, member_id: seedMembers[0].id, status: 'late', time_in: '2026-09-08T01:25:00Z' },
     { event_id: second, member_id: seedMembers[2].id, status: 'walk_in', time_in: '2026-09-08T01:10:00Z' },
-  ].map((row) => ({ ...row, org_id: org.id, method: 'manual' }));
-  const { error: attendanceError } = await db.from('attendance').upsert(attendance,
-    { onConflict: 'event_id,member_id', ignoreDuplicates: true });
+  ].filter((row) => pendingEvents.includes(row.event_id)).map((row) => ({
+    ...row, org_id: org.id, method: 'manual',
+    person_id: members!.find((member) => member.id === row.member_id)!.person_id,
+    registration_type: row.status === 'walk_in' ? 'walk_in' : 'pre_registered',
+    timing: row.status === 'late' ? 'late' : 'on_time',
+  }));
+  const { error: attendanceError } = attendance.length ? await db.from('attendance').upsert(attendance,
+    { onConflict: 'event_id,member_id', ignoreDuplicates: true }) : { error: null };
   if (attendanceError) throw attendanceError;
 
-  for (const eventId of [first, second]) {
+  for (const eventId of pendingEvents) {
+    const { error: reconcileError } = await db.rpc('reconcile_event', {
+      p_org_id: org.id, p_event_id: eventId, p_officer_id: null,
+    });
+    if (reconcileError) throw new Error(`Reconcile ${eventId}: ${reconcileError.message}`);
     const { error } = await db.rpc('finalize_event', {
       p_org_id: org.id, p_event_id: eventId, p_force: false,
     });

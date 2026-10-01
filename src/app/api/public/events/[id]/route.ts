@@ -33,7 +33,7 @@ export const GET = handler(async (_request: Request, route: Context) => {
   const { id } = await route.params;
   const admin = supabaseAdmin();
 
-  const { data: event } = await admin
+  const { data: event, error: eventError } = await admin
     .from("events")
     .select(
       "id,org_id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots," +
@@ -43,23 +43,27 @@ export const GET = handler(async (_request: Request, route: Context) => {
     .returns<PublicEvent[]>()
     .maybeSingle();
 
+  if (eventError) throw eventError;
   if (!event) throw ApiError.notFound("Event not found");
   if (event.status !== "published" && event.status !== "completed") {
     throw ApiError.notFound("Event not found");
   }
 
-  const { count: regCount } = await admin
+  const { count: regCount, error: countError } = await admin
     .from("registrations")
     .select("id", { count: "exact", head: true })
     .eq("event_id", id)
     .in("status", ["pending", "approved"]);
 
-  const [{ data: orgDefaults }, { data: eventExtras }] = await Promise.all([
+  if (countError) throw countError;
+  const [{ data: orgDefaults, error: orgError }, { data: eventExtras, error: fieldsError }] = await Promise.all([
     admin.from("org_form_fields").select("key,label,type,required,options,position")
       .eq("org_id", event.org_id).order("position").returns<EventField[]>(),
     admin.from("event_form_fields").select("key,label,type,required,options,position")
       .eq("event_id", id).order("position").returns<EventField[]>(),
   ]);
+  if (orgError) throw orgError;
+  if (fieldsError) throw fieldsError;
 
   const taken = regCount ?? 0;
   const { org_id: _orgId, ...publicEvent } = event;

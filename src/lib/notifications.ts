@@ -7,7 +7,7 @@ import { requireRole, type AuthContext } from "@/lib/supabase/server";
 
 type AttendanceNotice = {
   member_id: string;
-  status: "late" | "absent";
+  status: "late" | "absent" | "walk_in";
   members: { email: string | null; full_name: string } | null;
 };
 
@@ -23,7 +23,7 @@ export async function queueAttendanceNotifications(ctx: AuthContext, eventId: st
   }
 
   const { data, error } = await admin.from("attendance")
-    .select("member_id,status,members(email,full_name)").eq("event_id", eventId).in("status", ["late", "absent"]);
+    .select("member_id,status,members(email,full_name)").eq("event_id", eventId).or("status.eq.late,status.eq.absent,timing.eq.late");
   if (error) throw error;
   const rows = (data ?? []) as unknown as AttendanceNotice[];
   const notices = rows.flatMap((row) => {
@@ -37,40 +37,19 @@ export async function queueAttendanceNotifications(ctx: AuthContext, eventId: st
     ];
   });
   if (notices.length === 0) return { queued: 0 };
-  const { error: insertError } = await admin.from("notifications").upsert(notices, {
-    onConflict: "event_id,member_id,type,channel", ignoreDuplicates: true,
+  const { count, error: insertError } = await admin.from("notifications").upsert(notices, {
+    onConflict: "event_id,member_id,type,channel", ignoreDuplicates: true, count: "exact",
   });
   if (insertError) throw insertError;
-  return { queued: notices.length };
+  if (count === null) throw new Error("Notification insert returned no count");
+  return { queued: count };
 }
 
 export async function deliverDueNotifications(now = new Date()) {
   const admin = supabaseAdmin();
-  const reminderCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-  const { data: upcoming, error: upcomingError } = await admin.from("events")
-    .select("id,org_id,title,starts_at").eq("status", "published")
-    .gt("starts_at", now.toISOString()).lte("starts_at", reminderCutoff);
-  if (upcomingError) throw upcomingError;
-  for (const event of upcoming ?? []) {
-    const { data: registrations, error: registrationError } = await admin.from("registrations")
-      .select("member_id,email,full_name").eq("event_id", event.id).eq("status", "approved");
-    if (registrationError) throw registrationError;
-    const reminders = (registrations ?? []).filter((row) => row.email && row.member_id).map((row) => ({
-      org_id: event.org_id, event_id: event.id, member_id: row.member_id,
-      type: "event_reminder", channel: "email", recipient: row.email,
-      title: `Reminder: ${event.title}`,
-      body: `${row.full_name}, ${event.title} starts at ${new Date(event.starts_at).toISOString()}.`,
-    }));
-    if (reminders.length > 0) {
-      const { error: reminderError } = await admin.from("notifications").upsert(reminders, {
-        onConflict: "event_id,member_id,type,channel", ignoreDuplicates: true,
-      });
-      if (reminderError) throw reminderError;
-    }
-  }
-  const { data, error } = await admin.from("notifications").select("*")
-    .is("sent_at", null).is("failed_at", null).lte("scheduled_for", now.toISOString())
-    .order("scheduled_for").limit(100);
+  const { error: queueError } = await admin.rpc("enqueue_due_notifications", { p_now: now.toISOString() });
+  if (queueError) throw queueError;
+  const { data, error } = await admin.rpc("claim_due_notifications", { p_now: now.toISOString() });
   if (error) throw error;
 
   if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) {
@@ -82,25 +61,29 @@ export async function deliverDueNotifications(now = new Date()) {
     try {
       if (notice.channel === "email") {
         if (!resend || !env.EMAIL_FROM || !notice.recipient) throw new Error("Email delivery is not configured");
-        const result = await resend.emails.send({ from: env.EMAIL_FROM, to: notice.recipient, subject: notice.title, text: notice.body ?? "" });
+        const result = await resend.emails.send({ from: env.EMAIL_FROM, to: notice.recipient, subject: notice.title, text: notice.body ?? "" }, { idempotencyKey: `notification-${notice.id}` });
         if (result.error) throw result.error;
       } else {
         if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_SUBJECT) throw new Error("Push delivery is not configured");
         const { data: subscriptions, error: subscriptionError } = await admin.from("push_subscriptions")
           .select("endpoint,p256dh,auth").eq("member_id", notice.member_id);
         if (subscriptionError) throw subscriptionError;
-        await Promise.all((subscriptions ?? []).map((subscription) => webpush.sendNotification({
+        if (!subscriptions?.length) throw new Error("No push subscription for this member");
+        await Promise.all((subscriptions ?? []).map((subscription: { endpoint: string; p256dh: string; auth: string }) => webpush.sendNotification({
           endpoint: subscription.endpoint,
           keys: { p256dh: subscription.p256dh, auth: subscription.auth },
         }, JSON.stringify({ title: notice.title, body: notice.body, type: notice.type }))));
       }
-      await admin.from("notifications").update({ sent_at: new Date().toISOString() }).eq("id", notice.id);
+      const { error: saveError } = await admin.from("notifications").update({ sent_at: new Date().toISOString(), claimed_at: null }).eq("id", notice.id);
+      if (saveError) throw saveError;
       sent++;
     } catch (deliveryError) {
-      await admin.from("notifications").update({
+      const { error: saveError } = await admin.from("notifications").update({
         failed_at: new Date().toISOString(),
+        claimed_at: null,
         failure: deliveryError instanceof Error ? deliveryError.message.slice(0, 1000) : "Delivery failed",
       }).eq("id", notice.id);
+      if (saveError) throw saveError;
       failed++;
     }
   }

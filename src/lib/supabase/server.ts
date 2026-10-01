@@ -6,9 +6,6 @@ import { ApiError } from "@/lib/http";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
-/**
- * User-scoped client. Respects RLS. Use for anything acting "as the signed-in user".
- */
 export async function createClient(): Promise<SupabaseClient> {
   const cookieStore = await cookies();
 
@@ -24,7 +21,7 @@ export async function createClient(): Promise<SupabaseClient> {
               cookieStore.set(name, value, options),
             );
           } catch {
-            // Called from a Server Component — safe to ignore, middleware refreshes.
+
           }
         },
       },
@@ -39,7 +36,6 @@ export type AuthContext = {
   role: "org_admin" | "officer" | "scanner_operator";
 };
 
-/** Returns the signed-in user + their org/role, or throws 401. */
 export async function requireAuth(): Promise<AuthContext> {
   const supabase = await createClient();
   const { data: userData, error } = await supabase.auth.getUser();
@@ -63,7 +59,6 @@ export async function requireAuth(): Promise<AuthContext> {
   };
 }
 
-/** Role gate. Admin implicitly passes everything. */
 export function requireRole(
   ctx: AuthContext,
   allowed: Array<AuthContext["role"]>,

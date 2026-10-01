@@ -11,7 +11,6 @@ import type { AttendanceReportRow, MemberSummary } from "@/types/domain";
 const isoDateTime = z.string().datetime({ offset: true });
 const optionalText = z.string().trim().min(1).max(200).optional();
 
-/** Exports ignore pagination but are capped; above this, the caller must narrow filters. */
 export const EXPORT_ROW_LIMIT = 10_000;
 
 export const reportFormat = z.enum(["json", "csv", "pdf"]).default("json");
@@ -25,7 +24,7 @@ export const reportAttendanceStatus = z.enum(["present", "late", "walk_in", "abs
 
 export const attendanceReportQuerySchema = z.object({
   event_id: z.string().uuid().optional(),
-  /** Comma-separated, e.g. "present,late". */
+
   status: z.string().optional()
     .transform((value) => value ? value.split(",").map((s) => s.trim()).filter(Boolean) : undefined)
     .pipe(z.array(reportAttendanceStatus).min(1).optional()),
@@ -74,6 +73,18 @@ function assertExportable(total: number) {
   }
 }
 
+async function fetchExport<Row>(fetchPage: (limit: number, offset: number) => Promise<{ rows: Row[]; total: number }>) {
+  const first = await fetchPage(1000, 0);
+  assertExportable(first.total);
+  const rows = [...first.rows];
+  while (rows.length < first.total) {
+    const page = await fetchPage(1000, rows.length);
+    if (!page.rows.length || page.total !== first.total) throw ApiError.conflict("Report changed during export; retry");
+    rows.push(...page.rows);
+  }
+  return { rows, total: first.total };
+}
+
 function cell(value: unknown): string {
   return value === null || value === undefined ? "" : String(value);
 }
@@ -81,10 +92,6 @@ function cell(value: unknown): string {
 function dateStamp() {
   return new Date().toISOString().slice(0, 10);
 }
-
-// ---------------------------------------------------------------
-// Attendance report
-// ---------------------------------------------------------------
 
 const ATTENDANCE_COLUMNS: Array<PdfColumn & { key: keyof AttendanceReportRow; csv: string }> = [
   { key: "event_title", csv: "event_title", header: "Event", width: 2.6 },
@@ -127,7 +134,6 @@ async function fetchAttendanceReport(
   return stripTotal((data ?? []) as WithTotal<AttendanceReportRow>[]);
 }
 
-/** Officer-gated: the report spans the whole org's attendance history. */
 export async function attendanceReport(ctx: AuthContext, input: unknown): Promise<ReportResult<AttendanceReportRow>> {
   requireRole(ctx, ["officer"]);
   const query = attendanceReportQuerySchema.parse(input);
@@ -137,7 +143,7 @@ export async function attendanceReport(ctx: AuthContext, input: unknown): Promis
     return { kind: "json", data: paged(rows, total, query.page, query.per_page) };
   }
 
-  const { rows, total } = await fetchAttendanceReport(ctx, query, EXPORT_ROW_LIMIT + 1, 0);
+  const { rows, total } = await fetchExport((limit, offset) => fetchAttendanceReport(ctx, query, limit, offset));
   assertExportable(total);
   const values = (row: AttendanceReportRow) => ATTENDANCE_COLUMNS.map((column) =>
     column.key === "certificate_code" ? certificateCell(row) : cell(row[column.key]));
@@ -165,10 +171,6 @@ export async function attendanceReport(ctx: AuthContext, input: unknown): Promis
   return { kind: "file", file: { filename: `${filename}.pdf`, contentType: "application/pdf", body } };
 }
 
-// ---------------------------------------------------------------
-// Member summary report (credits + Tappies)
-// ---------------------------------------------------------------
-
 type MemberSummaryRow = Omit<MemberSummary, "attended" | "attendance_rate">;
 
 const MEMBER_COLUMNS: Array<PdfColumn & { key: keyof MemberSummary; csv: string }> = [
@@ -187,7 +189,6 @@ const MEMBER_COLUMNS: Array<PdfColumn & { key: keyof MemberSummary; csv: string 
   { key: "certificates_issued", csv: "certificates_issued", header: "Certs", width: 0.8, align: "right" },
 ];
 
-/** bigint columns arrive as numbers from PostgREST; derive attended + rate here. */
 export function toMemberSummary(row: MemberSummaryRow): MemberSummary {
   const n = (value: unknown) => Number(value ?? 0);
   const present = n(row.present), late = n(row.late), walkIn = n(row.walk_in), absent = n(row.absent);
@@ -238,7 +239,7 @@ export async function memberSummaryReport(ctx: AuthContext, input: unknown): Pro
     return { kind: "json", data: paged(rows, total, query.page, query.per_page) };
   }
 
-  const { rows, total } = await fetchMemberSummaries(params, EXPORT_ROW_LIMIT + 1, 0);
+  const { rows, total } = await fetchExport((limit, offset) => fetchMemberSummaries(params, limit, offset));
   assertExportable(total);
   const filename = `member-summary-${dateStamp()}`;
 
@@ -260,7 +261,6 @@ export async function memberSummaryReport(ctx: AuthContext, input: unknown): Pro
   return { kind: "file", file: { filename: `${filename}.pdf`, contentType: "application/pdf", body } };
 }
 
-/** Lifetime summary for one member. Readable by any signed-in org user, like getMember. */
 export async function getMemberSummary(ctx: AuthContext, id: string): Promise<MemberSummary> {
   memberIdSchema.parse(id);
   const { rows } = await fetchMemberSummaries({ orgId: ctx.orgId, memberId: id }, 1, 0);
@@ -279,11 +279,6 @@ export async function tappiesLeaderboard(ctx: AuthContext, limit = 100) {
   return data ?? [];
 }
 
-// ---------------------------------------------------------------
-// Shared formatting
-// ---------------------------------------------------------------
-
-/** PDF cells only; the subtitle states "times in UTC" once. Fixed UTC keeps exports server-locale independent. */
 function formatDateTime(iso: string): string {
   return new Date(iso).toISOString().slice(0, 16).replace("T", " ");
 }

@@ -5,12 +5,6 @@ import { exportMembersCsv, importMembers, parseCsv, toCsv } from "@/lib/members-
 const orgId = "e030dfb1-3186-493b-b58f-705603329231";
 const userId = "9c6a2b1e-4f2a-4a2f-9a34-7b2f0e9a1234";
 
-// ---------------------------------------------------------------
-// A minimal fake PostgREST-style query builder, general enough to satisfy
-// both the select().eq().eq().maybeSingle() shape and the
-// update().eq().eq() / select().eq().order().order() "await the chain
-// directly" shape members-csv.ts relies on.
-// ---------------------------------------------------------------
 type Filters = Record<string, unknown>;
 type Handlers = {
   onSelectMaybeSingle?: (table: string, filters: Filters) => { data: unknown; error: unknown };
@@ -27,6 +21,7 @@ function fakeSupabase(handlers: Handlers) {
       select: () => chain({ ...state, op: "select" }),
       eq: (key: string, value: unknown) => chain({ ...state, filters: { ...state.filters, [key]: value } }),
       order: () => chain(state),
+      range: () => chain(state),
       maybeSingle: async () => {
         calls.push({ ...state, op: "maybeSingle" });
         return handlers.onSelectMaybeSingle?.(state.table, state.filters) ?? { data: null, error: null };
@@ -62,6 +57,10 @@ function context(handlers: Handlers, role: AuthContext["role"] = "officer") {
 }
 
 describe("parseCsv / toCsv", () => {
+  it("rejects incomplete quotes and neutralizes spreadsheet formulas", () => {
+    expect(() => parseCsv('a,b\n"unfinished')).toThrow("unterminated");
+    expect(parseCsv(toCsv([["=1+1", "@SUM(A1)", "-5"]]))).toEqual([["'=1+1", "'@SUM(A1)", "-5"]]);
+  });
   it("splits header + rows on plain fields", () => {
     expect(parseCsv("a,b,c\n1,2,3\n4,5,6")).toEqual([["a", "b", "c"], ["1", "2", "3"], ["4", "5", "6"]]);
   });
@@ -228,7 +227,7 @@ describe("exportMembersCsv", () => {
       "2026-0001", "Alyssa Santos", "alyssa@test.local", "BS CS", "member",
       "active", "2035787938", "2026-09-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
     ]);
-    // null fields serialize to empty CSV cells
+
     expect(parsed[2]).toEqual([
       "2026-0002", "No Card", "", "", "member", "active", "", "", "2026-01-02T00:00:00.000Z",
     ]);

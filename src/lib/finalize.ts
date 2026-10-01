@@ -1,6 +1,7 @@
 import { ApiError } from "@/lib/http";
 import { requireRole, type AuthContext } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { z } from "zod";
 
 type PgError = { code?: string; message: string };
 
@@ -28,6 +29,7 @@ function throwForFinalizeRpcError(error: PgError): never {
 
 export async function reconcileEvent(ctx: AuthContext, eventId: string) {
   requireRole(ctx, ["officer"]);
+  z.string().uuid().parse(eventId);
   const { data, error } = await supabaseAdmin().rpc("reconcile_event", {
     p_org_id: ctx.orgId,
     p_event_id: eventId,
@@ -45,6 +47,7 @@ export async function finalizeEvent(
 ): Promise<FinalizeSummary> {
   requireRole(ctx, ["officer"]);
 
+  z.string().uuid().parse(eventId);
   const { data, error } = await supabaseAdmin().rpc("finalize_event", {
     p_org_id: ctx.orgId,
     p_event_id: eventId,

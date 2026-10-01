@@ -7,19 +7,21 @@ export const GET = handler(async (_request: Request, route: Context) => {
   const { eventId } = await route.params;
   const admin = supabaseAdmin();
 
-  const { data: event } = await admin
+  const { data: event, error: eventError } = await admin
     .from("events")
     .select("id,slots,status")
     .eq("id", eventId)
     .maybeSingle();
-  if (!event) throw ApiError.notFound("Event not found");
+  if (eventError) throw eventError;
+  if (!event || !["published", "completed"].includes(event.status)) throw ApiError.notFound("Event not found");
 
-  const { count } = await admin
+  const { count, error: countError } = await admin
     .from("registrations")
     .select("id", { count: "exact", head: true })
     .eq("event_id", eventId)
     .in("status", ["pending", "approved"]);
 
+  if (countError) throw countError;
   const taken = count ?? 0;
   return ok({
     slots: event.slots,

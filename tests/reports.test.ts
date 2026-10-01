@@ -20,7 +20,6 @@ const eventId = "b2cf1e73-8d36-4a4b-86b7-b559ce4c4530";
 const memberId = "1e9c9a1a-1111-4a4b-86b7-b559ce4c4530";
 const certId = "3e9c9a1a-3333-4a4b-86b7-b559ce4c4530";
 
-/** Same fetch-queue pattern as tests/events.test.ts. */
 function context(bodies: unknown[] = [], role: AuthContext["role"] = "officer") {
   let call = 0;
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
@@ -86,12 +85,12 @@ describe("attendanceReport", () => {
   });
 
   it("exports CSV without pagination, quoting commas and marking revoked certificates", async () => {
-    mocks.rpc.mockResolvedValue({ data: [attendanceRow], error: null });
+    mocks.rpc.mockResolvedValue({ data: [{ ...attendanceRow, total_count: 1 }], error: null });
     const { ctx } = context();
     const result = await attendanceReport(ctx, { format: "csv" });
 
     expect(mocks.rpc).toHaveBeenCalledWith("report_attendance", expect.objectContaining({
-      p_limit: EXPORT_ROW_LIMIT + 1, p_offset: 0,
+      p_limit: 1000, p_offset: 0,
     }));
     if (result.kind !== "file") throw new Error("expected a file");
     expect(result.file.contentType).toBe("text/csv; charset=utf-8");
@@ -102,7 +101,7 @@ describe("attendanceReport", () => {
   });
 
   it("exports a PDF", async () => {
-    mocks.rpc.mockResolvedValue({ data: [attendanceRow], error: null });
+    mocks.rpc.mockResolvedValue({ data: [{ ...attendanceRow, total_count: 1 }], error: null });
     const { ctx } = context();
     const result = await attendanceReport(ctx, { format: "pdf" });
     if (result.kind !== "file") throw new Error("expected a file");
@@ -114,6 +113,17 @@ describe("attendanceReport", () => {
     mocks.rpc.mockResolvedValue({ data: [{ ...attendanceRow, total_count: EXPORT_ROW_LIMIT + 1 }], error: null });
     const { ctx } = context();
     await expect(attendanceReport(ctx, { format: "csv" })).rejects.toMatchObject({ status: 422 });
+  });
+
+  it("exports all rows across the database response limit", async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: Array.from({ length: 1000 }, (_, i) => ({ ...attendanceRow, full_name: "First " + i, total_count: 1001 })), error: null });
+    mocks.rpc.mockResolvedValueOnce({ data: [{ ...attendanceRow, full_name: "Last person", total_count: 1001 }], error: null });
+    const { ctx } = context();
+    const result = await attendanceReport(ctx, { format: "csv" });
+    if (result.kind !== "file") throw new Error("expected file");
+    expect(String(result.file.body).trim().split("\r\n")).toHaveLength(1002);
+    expect(String(result.file.body)).toContain("Last person");
+    expect(mocks.rpc).toHaveBeenLastCalledWith("report_attendance", expect.objectContaining({ p_offset: 1000, p_limit: 1000 }));
   });
 });
 

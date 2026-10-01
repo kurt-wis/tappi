@@ -1,19 +1,3 @@
--- =============================================================
--- Tappi — Part 5: record_scan RPC
--- =============================================================
--- Idempotent:
---  - same member taps twice → returns the existing row
---  - same client_scan_id replayed (offline sync) → returns existing
---
--- Custom SQLSTATEs:
---   TP020  card UID not linked to any member in this org
---   TP021  event not found in this org
---   TP022  event is not in 'published' status
---   TP023  walk-ins are closed for this event
---   TP024  walk-ins require approval for this event
---   TP025  member is not active
--- ---------------------------------------------------------------
-
 create or replace function public.record_scan(
   p_org_id         uuid,
   p_event_id       uuid,

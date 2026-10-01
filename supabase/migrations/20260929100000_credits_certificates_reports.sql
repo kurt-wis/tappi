@@ -1,29 +1,3 @@
--- =============================================================
--- Tappi — Part 7: credits, Tappies (streaks), certificates, reports
--- =============================================================
--- points_ledger is the credits ledger (finalize_event writes one
--- 'event_attendance' row per attendee; officers can add manual
--- adjustments). certificates already exists (see 0001_init).
---
--- All functions below are SECURITY DEFINER and revoked from the Data
--- API roles. Application code calls them with the service-role client
--- only after its own requireAuth()/requireRole() checks — they trust
--- p_org_id / p_officer_id as given (same convention as Parts 4–6).
---
--- Custom SQLSTATEs:
---   TP040  event not found in this org
---   TP041  certificates are not enabled for this event
---   TP042  event is not completed (finalize before issuing)
---   TP043  certificate not found in this org
---   TP044  certificate is already revoked
--- ---------------------------------------------------------------
-
--- ---------------------------------------------------------------
--- Writes to credits and certificates go through audited server
--- paths only. The init migration's same-org "for all" policies let
--- any signed-in user (including scanner operators) award themselves
--- credits or mint certificates via the Data API; narrow to select.
--- ---------------------------------------------------------------
 drop policy points_all on public.points_ledger;
 create policy points_select on public.points_ledger
   for select to authenticated using (org_id = public.current_org_id());
@@ -34,12 +8,9 @@ create policy certificates_select on public.certificates
   for select to authenticated using (org_id = public.current_org_id());
 revoke insert, update, delete on public.certificates from public, anon, authenticated;
 
--- A zero-credit entry is meaningless; finalize never writes one.
 alter table points_ledger
   add constraint points_ledger_nonzero_chk check (points <> 0);
 
--- Defense in depth for finalize_event's idempotency: one attendance
--- award per member per event.
 create unique index uq_points_event_attendance
   on points_ledger(event_id, member_id)
   where reason = 'event_attendance';
@@ -52,12 +23,6 @@ alter table certificates
 
 create index idx_certificates_member on certificates(member_id);
 
--- ---------------------------------------------------------------
--- Certificate codes: 16 random hex chars as XXXX-XXXX-XXXX-XXXX.
--- Built from gen_random_uuid() (core, CSPRNG-backed) rather than
--- pgcrypto so it does not depend on which schema the extension is
--- installed in. Skips the UUID's fixed version/variant nibbles.
--- ---------------------------------------------------------------
 create or replace function public.generate_certificate_code()
 returns text language sql volatile set search_path = public as $$
   select upper(substr(h, 1, 4) || '-' || substr(h, 5, 4) || '-' ||
@@ -65,16 +30,6 @@ returns text language sql volatile set search_path = public as $$
     from (select replace(gen_random_uuid()::text, '-', '') as h) s
 $$;
 
--- ---------------------------------------------------------------
--- issue_certificates: issue to every eligible attendee of a
--- completed, certificate-enabled event, or only to p_member_ids.
--- Eligible = attendance status present, late or walk_in (walk-ins
--- count). Idempotent: already-issued active certificates are left
--- alone. Revoked certificates are only reinstated when that member
--- is named explicitly in p_member_ids (a bulk run never silently
--- undoes a revocation); reinstating mints a new code so a revoked
--- printout stays invalid.
--- ---------------------------------------------------------------
 create or replace function public.issue_certificates(
   p_org_id     uuid,
   p_event_id   uuid,
@@ -184,13 +139,6 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------
--- report_attendance: one row per (event, member). Attendance rows,
--- plus master-list members of a still-published event who have not
--- tapped yet (status 'not_scanned'). Draft events are excluded.
--- Certificate eligibility mirrors issue_certificates exactly.
--- total_count is the filtered count before limit/offset.
--- ---------------------------------------------------------------
 create or replace function public.report_attendance(
   p_org_id   uuid,
   p_event_id uuid        default null,
@@ -266,20 +214,6 @@ as $$
     limit p_limit offset p_offset
 $$;
 
--- ---------------------------------------------------------------
--- report_member_summary: per-member credits + Tappies + attendance
--- counts, optionally windowed to events starting in [p_from, p_to].
---
--- Tappies = consecutive attended events. Only completed events count
--- and only ones where the member has an attendance row (on the master
--- list, or walked in), in start order. present/late/walk_in extend
--- the streak; absent breaks it. Events a member was never expected at
--- neither extend nor break it. current_tappies is the run ending at
--- the member's most recent such event (0 if that one was an absence).
---
--- Credits in a window: ledger rows tied to an event use the event's
--- start time; manual adjustments use the entry's created_at.
--- ---------------------------------------------------------------
 create or replace function public.report_member_summary(
   p_org_id    uuid,
   p_member_id uuid          default null,

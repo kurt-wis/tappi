@@ -1,10 +1,12 @@
 import { handler, ok, ApiError } from "@/lib/http";
 import { requireAuth, requireRole } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { memberId } from "@/lib/members";
 
 export const POST = handler(
   async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    memberId.parse(id);
 
     const ctx = await requireAuth();
     requireRole(ctx, ["org_admin", "officer"]);
@@ -22,6 +24,7 @@ export const POST = handler(
       p_member_id: id,
       p_officer_id: ctx.userId,
     });
+    if (error?.code === "TP002") throw ApiError.conflict("Link a replacement card before resolving");
     if (error) {
       console.error("[resolve-lost] RPC error", error);
       throw new ApiError("internal_error", "Could not resolve lost card", 500);

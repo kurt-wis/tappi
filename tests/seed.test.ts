@@ -4,7 +4,6 @@ import { seed, seedAccounts, seedId, seedMembers } from "../scripts/seed";
 
 type Row = Record<string, unknown>;
 
-/** In-memory Data API substitute: no credentials, network, or real database. */
 function database() {
   const tables: Record<string, Row[]> = Object.fromEntries(
     ["organizations", "profiles", "members", "events", "event_master_list"].map((name) => [name, []]),
@@ -23,6 +22,12 @@ function database() {
   };
   const client = {
     auth: { admin },
+    async rpc(name: string, input: { p_member_id: string; p_card_uid: string }) {
+      expect(name).toBe("link_member_card");
+      const row = tables.members.find((m) => m.id === input.p_member_id);
+      if (row) row.card_uid = input.p_card_uid;
+      return { data: row, error: null };
+    },
     from(table: string) {
       return {
         update(changes: Row) {

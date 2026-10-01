@@ -1,7 +1,3 @@
--- Tappi PDF compliance and fresh-database reproducibility.
--- This migration is deliberately additive: `members` remains the API-facing
--- organization directory while `persons` is the global identity record.
-
 create or replace function public.normalize_student_number(value text)
 returns text language sql immutable strict set search_path = public as $$
   select nullif(regexp_replace(upper(trim(value)), '[-[:space:]]', '', 'g'), '')
@@ -230,7 +226,6 @@ alter table public.notifications add column if not exists failure text;
 create unique index if not exists notifications_delivery_uq
   on public.notifications(event_id, member_id, type, channel) where event_id is not null;
 
--- Every mutable tenant table is writable only by an officer/admin through RLS.
 drop policy if exists events_all on public.events;
 create policy events_select on public.events for select using (org_id = public.current_org_id());
 create policy events_write on public.events for all
@@ -273,7 +268,6 @@ create policy event_fields_select on public.event_form_fields for select using (
 create policy push_subscriptions_org on public.push_subscriptions for all
   using (org_id = public.current_org_id()) with check (org_id = public.current_org_id());
 
--- Card operations maintain the global card pointer and retain an audited reason.
 alter table public.card_link_audit add column if not exists reason text;
 
 create or replace function public.link_member_card(
@@ -331,7 +325,6 @@ end $$;
 revoke all on function public.replace_member_card(uuid,uuid,text,uuid) from public,anon,authenticated;
 revoke all on function public.replace_member_card(uuid,uuid,text,uuid,text) from public,anon,authenticated;
 
--- Idempotent scans: a quick repeat is ignored; a later repeat records time-out.
 create or replace function public.record_scan(
   p_org_id uuid, p_event_id uuid, p_card_uid text, p_scanned_at timestamptz default now(),
   p_officer_id uuid default null, p_device_id text default null,
@@ -393,7 +386,6 @@ begin
   return v_event;
 end $$;
 
--- Override finalization so absence creation is impossible before reconciliation.
 create or replace function public.finalize_event(p_org_id uuid,p_event_id uuid,p_officer_id uuid default null,p_force boolean default false)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_event events; v_absent integer:=0; v_points integer:=0; v_total integer:=0;
@@ -427,8 +419,6 @@ begin
   return jsonb_build_object('already_finalized',false,'absent_marked',v_absent,'points_awarded',v_points,'total_attendees',v_total);
 end $$;
 
--- Atomic public registration prevents capacity races and creates no directory
--- entry until an officer approves the registration.
 create or replace function public.register_for_event(
   p_event_id uuid,p_full_name text,p_student_number text,p_email citext,p_answers jsonb,p_autofill_used boolean
 ) returns registrations language plpgsql security definer set search_path=public as $$
@@ -474,8 +464,6 @@ grant execute on function public.register_for_event(uuid,text,text,citext,jsonb,
 revoke all on function public.review_registration(uuid,uuid,text,uuid) from public,anon,authenticated;
 revoke all on function public.reconcile_event(uuid,uuid,uuid) from public,anon,authenticated;
 
--- Tappies are the lifetime number of finalized events attended. Absences never
--- reduce the value; there is no mutable counter to drift during corrections.
 create or replace function public.report_member_summary(
   p_org_id uuid, p_member_id uuid default null, p_status member_status default null,
   p_search text default null, p_course text default null,
@@ -522,7 +510,6 @@ create or replace function public.report_member_summary(
   left join certs ce on ce.member_id=s.id order by s.full_name,s.id limit p_limit offset p_offset
 $$;
 
--- Reports include source and time-out and support the PDF's committee filter.
 drop function if exists public.report_attendance(uuid,uuid,text[],timestamptz,timestamptz,text,text,integer,integer);
 create or replace function public.report_attendance(
   p_org_id uuid,p_event_id uuid default null,p_statuses text[] default null,
@@ -570,7 +557,6 @@ language sql stable security definer set search_path=public as $$
   group by m.id,m.student_number,m.full_name order by count(*) desc,m.full_name limit least(p_limit,500)
 $$;
 
--- Certificates inherit global person identity from the attendance row.
 create or replace function public.issue_certificates(
   p_org_id uuid,p_event_id uuid,p_officer_id uuid default null,p_member_ids uuid[] default null
 ) returns jsonb language plpgsql security definer set search_path=public as $$

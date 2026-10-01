@@ -11,7 +11,8 @@ const schema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
-  CRON_SECRET: z.string().min(16).optional(),
+  CRON_SECRET: z.preprocess((value) => value === "" ? undefined : value, z.string().min(16).optional()),
+  SCHOOL_EMAIL_DOMAINS: z.string().default(""),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -24,7 +25,6 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
-/** Server-only guard — call this inside any route that touches the service role. */
 export function requireServiceRoleKey(): string {
   if (!env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");

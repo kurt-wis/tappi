@@ -1,7 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** Public API handlers perform any endpoint-specific authentication themselves. */
 export function isPublicPath(pathname: string): boolean {
   return pathname === "/login" || pathname === "/signup" ||
     pathname === "/api/auth" || pathname.startsWith("/api/auth/") ||
@@ -21,7 +20,7 @@ export async function proxy(request: NextRequest) {
       cookies: {
         getAll: () => request.cookies.getAll(),
         setAll: (cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) => {
-          // Downstream handlers must see the refreshed token on this request too.
+
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           const previousCookies = response.cookies.getAll();
           response = NextResponse.next({ request });
@@ -34,7 +33,6 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  // getUser verifies with Auth and refreshes expired sessions; never trust getSession alone.
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) {
     let denied: NextResponse;

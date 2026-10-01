@@ -1,53 +1,17 @@
+import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { z } from "zod";
-import { randomBytes, createHash } from "crypto";
+import { hashSecret } from "@/lib/auth/student";
 
-const bodySchema = z.object({
-  sessionId: z.string().uuid(),
-  otp: z.string().length(6),
-});
-
-function hashCode(code: string): string {
-  return createHash("sha256").update(code).digest("hex");
-}
-
-export const POST = handler(async (req: Request) => {
-  const { sessionId, otp } = bodySchema.parse(await readJson(req));
-  const admin = supabaseAdmin();
-
-  const { data: session } = await admin
-    .from("registration_lookup_sessions")
-    .select("*")
-    .eq("id", sessionId)
-    .maybeSingle();
-
-  if (!session) throw ApiError.notFound("Lookup session not found");
-  if (new Date(session.expires_at) < new Date())
-    throw ApiError.conflict("Lookup session expired");
-  if (session.otp_attempts >= 3) throw ApiError.conflict("Too many attempts");
-  if (!session.otp_expires_at || new Date(session.otp_expires_at) < new Date())
-    throw ApiError.conflict("Code expired");
-
-  if (hashCode(otp) !== session.otp_code_hash) {
-    await admin
-      .from("registration_lookup_sessions")
-      .update({ otp_attempts: session.otp_attempts + 1 })
-      .eq("id", sessionId);
-    throw ApiError.conflict("Invalid code");
-  }
-
+const schema = z.object({ sessionId: z.string().uuid(), otp: z.string().regex(/^\d{6}$/) }).strict();
+export const POST = handler(async (request: Request) => {
+  const { sessionId, otp } = schema.parse(await readJson(request));
   const token = randomBytes(32).toString("hex");
-  const tokenHash = hashCode(token);
-
-  await admin
-    .from("registration_lookup_sessions")
-    .update({
-      verified: true,
-      autofill_token_hash: tokenHash,
-      autofill_token_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    })
-    .eq("id", sessionId);
-
+  const { data, error } = await supabaseAdmin().rpc("verify_registration_lookup", {
+    p_session_id: sessionId, p_code_hash: hashSecret(otp), p_token_hash: hashSecret(token),
+  });
+  if (error) throw error;
+  if (!data) throw ApiError.conflict("Invalid, expired, or exhausted verification code");
   return ok({ autofillToken: token });
 });

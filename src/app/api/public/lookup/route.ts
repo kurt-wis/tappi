@@ -1,101 +1,39 @@
+import { z } from "zod";
+import { randomInt } from "node:crypto";
 import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { env } from "@/lib/env";
-import { z } from "zod";
-import { createHash } from "crypto";
-import { Resend } from "resend";
+import { studentNumberSchema, hashSecret, sendVerificationEmail } from "@/lib/auth/student";
 
-const bodySchema = z.object({
-  studentNumber: z.string().min(1).max(64),
-  eventId: z.string().uuid(),
-});
+const schema = z.object({ studentNumber: studentNumberSchema, eventId: z.string().uuid() }).strict();
 
-function normalizeStudentNumber(s: string): string {
-  return s.replace(/[-\s]/g, "").trim();
-}
-
-function maskName(name: string): string {
-  const first = (name || "").split(" ")[0] || "";
-  if (first.length <= 1) return first;
-  return first[0] + "***";
-}
-
-function maskEmail(email: string): string {
-  const [local, domain] = email.split("@");
-  if (!domain) return "***";
-  return `${local.slice(0, 1)}***@${domain}`;
-}
-
-function hashCode(code: string): string {
-  return createHash("sha256").update(code).digest("hex");
-}
-
-export const POST = handler(async (req: Request) => {
-  const { studentNumber, eventId } = bodySchema.parse(await readJson(req));
-  const normalized = normalizeStudentNumber(studentNumber);
+export const POST = handler(async (request: Request) => {
+  const { studentNumber, eventId } = schema.parse(await readJson(request));
   const admin = supabaseAdmin();
-
-  const { data: event } = await admin
-    .from("events")
-    .select("id, org_id")
-    .eq("id", eventId)
-    .returns<{ id: string; org_id: string }[]>()
-    .maybeSingle();
-
+  const { data: event, error: eventError } = await admin.from("events").select("id,org_id")
+    .eq("id", eventId).eq("status", "published").maybeSingle();
+  if (eventError) throw eventError;
   if (!event) return ok({ found: false });
-
-  const { data: member } = await admin
-    .from("members")
-    .select("id, full_name, email")
-    .eq("org_id", event.org_id)
-    .eq("student_number", normalized)
-    .returns<{ id: string; full_name: string; email: string | null }[]>()
-    .maybeSingle();
-
-  if (!member || !member.email) return ok({ found: false });
-
-  const { data: person } = await admin.from("members").select("person_id")
-    .eq("id", member.id).single();
-  if (!person?.person_id) return ok({ found: false });
-
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  const otpHash = hashCode(otp);
-
-  const { data: session, error: sErr } = await admin
-    .from("registration_lookup_sessions")
-    .insert({
-      event_id: eventId,
-      org_id: event.org_id,
-      person_id: person.person_id,
-      student_number_normalized: normalized,
-      masked_first_name: maskName(member.full_name),
-      masked_email: maskEmail(member.email),
-      otp_code_hash: otpHash,
-      otp_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (sErr || !session) {
-    throw new ApiError("internal_error", "Could not start lookup session", 500);
-  }
-
-  if (env.RESEND_API_KEY) {
-    const resend = new Resend(env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: env.EMAIL_FROM ?? "Tappi <onboarding@resend.dev>",
-      to: member.email,
-      subject: "Your Tappi verification code",
-      html: `<p>Your verification code is <strong>${otp}</strong>. It expires in 10 minutes.</p>`,
-    });
-  } else {
-    console.warn("[public/lookup] RESEND_API_KEY missing. Dev OTP:", otp);
-  }
-
-  return ok({
-    found: true,
-    sessionId: session.id,
-    maskedFirstName: maskName(member.full_name),
-    maskedEmail: maskEmail(member.email),
+  const { data: member, error: memberError } = await admin.from("members")
+    .select("person_id,full_name,email").eq("org_id", event.org_id).eq("student_number", studentNumber).maybeSingle();
+  if (memberError) throw memberError;
+  if (!member?.email) return ok({ found: false });
+  const { data: person, error: personError } = await admin.from("persons")
+    .select("email,full_name").eq("id", member.person_id).is("merged_into", null).maybeSingle();
+  if (personError) throw personError;
+  if (!person?.email) return ok({ found: false });
+  const maskedFirstName = person.full_name.trim().slice(0, 1) + "***";
+  const maskedEmail = String(person.email).replace(/^(.).*(@.*)$/, "$1***$2");
+  const code = String(randomInt(100000, 1000000));
+  const { data: sessionId, error } = await admin.rpc("start_registration_lookup", {
+    p_event_id: eventId, p_person_id: member.person_id, p_number: studentNumber,
+    p_masked_name: maskedFirstName, p_masked_email: maskedEmail, p_code_hash: hashSecret(code),
   });
+  if (error) throw error;
+  if (!sessionId) throw new ApiError("rate_limited", "Wait a minute before requesting another code", 429);
+  try { await sendVerificationEmail(person.email, code); }
+  catch (error) {
+    await admin.from("registration_lookup_sessions").delete().eq("id", sessionId);
+    throw error;
+  }
+  return ok({ found: true, sessionId, maskedFirstName, maskedEmail });
 });

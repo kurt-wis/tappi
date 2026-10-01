@@ -1,25 +1,20 @@
-# Dependencies
 node_modules/
 .pnp
 .pnp.js
 
-# Next.js
 .next/
 out/
 build/
 dist/
 
-# Environment — NEVER COMMIT
 .env
 .env*.local
 .env.local
 
-# Supabase
 supabase/.temp/
 supabase/.branches/
 supabase/.env
 
-# Test artifacts / scratch files
 cookies*.txt
 signup*.json
 login.json
@@ -30,7 +25,6 @@ import*.json
 import*.csv
 members-export.csv
 
-# OS / editor
 .DS_Store
 Thumbs.db
 .vscode/*
@@ -38,16 +32,13 @@ Thumbs.db
 .idea/
 *.swp
 
-# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Vercel
 .vercel
 
-# TypeScript
 *.tsbuildinfo
 next-env.d.ts
 

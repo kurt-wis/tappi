@@ -2,7 +2,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 
 export type PdfColumn = {
   header: string;
-  /** Relative width; columns share the usable page width in proportion. */
+
   width: number;
   align?: "left" | "right";
 };
@@ -14,7 +14,6 @@ export type PdfTable = {
   rows: string[][];
 };
 
-// A4 landscape, in points.
 const PAGE_WIDTH = 841.89;
 const PAGE_HEIGHT = 595.28;
 const MARGIN = 36;
@@ -23,11 +22,6 @@ const HEADER_SIZE = 8;
 const ROW_HEIGHT = 14;
 const CELL_PADDING = 3;
 
-/**
- * The standard 14 fonts only encode WinAnsi (Latin-1-ish). Accented Latin
- * names like "Peña" survive; anything else (CJK, emoji) becomes "?" rather
- * than throwing mid-export.
- */
 export function toWinAnsi(text: string): string {
   return text.replace(/[\r\n\t]+/g, " ").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
 }
@@ -45,7 +39,6 @@ function fit(text: string, font: PDFFont, size: number, maxWidth: number): strin
   return text.slice(0, low) + ellipsis;
 }
 
-/** Plain paginated table: title + subtitle on page 1, repeated column headers, page numbers. */
 export async function renderTablePdf(table: PdfTable): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(toWinAnsi(table.title));

@@ -14,7 +14,6 @@ export const creditQuerySchema = z.object({
   per_page: z.coerce.number().int().min(1).max(1_000_000).default(50).transform((n) => Math.min(n, 200)),
 }).strict();
 
-/** Manual adjustment. Negative points deduct. "event_attendance" is reserved for finalize_event. */
 export const adjustCreditsSchema = z.object({
   points: z.number().int().min(-100_000).max(100_000).refine((n) => n !== 0, "points must be non-zero"),
   reason: z.string().trim().min(1).max(200)
@@ -29,13 +28,10 @@ async function assertMemberInOrg(ctx: AuthContext, id: string): Promise<{ person
   return { person_id: data.person_id as string };
 }
 
-/** Balance is summed over the whole ledger, not just the returned page. */
 export async function getMemberCredits(ctx: AuthContext, id: string, input: unknown) {
   memberIdSchema.parse(id);
   const { page, per_page } = creditQuerySchema.parse(input);
 
-  // Also the org-scoped existence check (404s for another org's member).
-  // Summed in SQL: a client-side sum over PostgREST rows would silently stop at its row cap.
   const { credits: balance } = await getMemberSummary(ctx, id);
 
   const { data, error, count } = await ctx.supabase.from("points_ledger")
@@ -52,11 +48,6 @@ export async function getMemberCredits(ctx: AuthContext, id: string, input: unkn
   };
 }
 
-/**
- * Writes go through the service-role client: authenticated users have no
- * INSERT grant on points_ledger (Part 7 migration), so the officer check
- * here is the only path that can mint or deduct credits.
- */
 export async function adjustCredits(ctx: AuthContext, id: string, input: unknown): Promise<CreditEntry> {
   requireRole(ctx, ["officer"]);
   memberIdSchema.parse(id);

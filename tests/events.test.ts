@@ -2,8 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import type { AuthContext } from "@/lib/supabase/server";
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), requireAuth: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: () => ({ rpc: mocks.rpc }) }));
+vi.mock("@/lib/supabase/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/supabase/server")>(),
+  requireAuth: mocks.requireAuth,
+}));
+
+const { POST: finalize } = await import("@/app/api/events/[id]/finalize/route");
 
 const {
   listEvents, getEvent, createEvent, updateEvent, deleteEvent, duplicateEvent,
@@ -27,13 +33,6 @@ const draftEvent = {
 type MockResponse = { body: unknown; headers?: Record<string, string> };
 const res = (body: unknown, headers?: Record<string, string>): MockResponse => ({ body, headers });
 
-/**
- * A queue of raw REST responses, one per outgoing fetch call (mirrors the
- * pattern in tests/member-cards.test.ts `getCardHistory` case). Supabase-js
- * unwraps a single-element array into an object for .single()/.maybeSingle()
- * calls, so single-row responses are still given as one-element arrays here,
- * matching tests/members.test.ts.
- */
 function context(responses: MockResponse[], role: AuthContext["role"] = "officer") {
   let call = 0;
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
@@ -52,6 +51,53 @@ function context(responses: MockResponse[], role: AuthContext["role"] = "officer
 
 beforeEach(() => {
   mocks.rpc.mockReset();
+  mocks.requireAuth.mockReset();
+});
+
+describe("event finalization request", () => {
+  const summary = { already_finalized: false, absent_marked: 0, points_awarded: 0, total_attendees: 0 };
+  const route = () => ({ params: Promise.resolve({ id: eventId }) });
+  const request = (body?: string) => new Request(`http://localhost/api/events/${eventId}/finalize`, {
+    method: "POST", body,
+  });
+
+  beforeEach(() => {
+    mocks.requireAuth.mockResolvedValue(context([]).ctx);
+    mocks.rpc.mockResolvedValue({ data: summary, error: null });
+  });
+
+  it.each([undefined, "", "   ", "{}"])("defaults force to false for an omitted option: %s", async (body) => {
+    const response = await finalize(request(body), route());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: summary });
+    expect(mocks.rpc).toHaveBeenCalledWith("finalize_event", {
+      p_org_id: orgId, p_event_id: eventId, p_officer_id: userId, p_force: false,
+    });
+  });
+
+  it.each([true, false])("preserves the boolean force value %s", async (force) => {
+    const response = await finalize(request(JSON.stringify({ force })), route());
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith("finalize_event", expect.objectContaining({ p_force: force }));
+  });
+
+  it.each([
+    '{"force":', '{"force":"false"}', '{"force":"true"}', '{"force":0}',
+    '{"force":1}', '{"force":null}', '{"force":[]}', '{"force":{}}',
+    "null", "[]", "false", '{"unexpected":true}',
+  ])("rejects invalid input before finalizing: %s", async (body) => {
+    const response = await finalize(request(body), route());
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: "validation_error" } });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects scanner operators before finalizing", async () => {
+    mocks.requireAuth.mockResolvedValue(context([], "scanner_operator").ctx);
+    const response = await finalize(request(), route());
+    expect(response.status).toBe(403);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
 });
 
 describe("listEvents", () => {
@@ -70,8 +116,7 @@ describe("listEvents", () => {
 
 describe("createEvent", () => {
   it("always creates in draft status, tagged with the caller as created_by", async () => {
-    // .insert(...).single() does NOT unwrap a single-element array the way .maybeSingle() does, so
-    // this mock returns the plain object PostgREST sends for a "Prefer: return=representation" single insert.
+
     const { ctx, fetch } = context([res(draftEvent)]);
     const result = await createEvent(ctx, { title: "Orientation", starts_at: "2026-10-01T09:00:00Z", ends_at: "2026-10-01T12:00:00Z" });
     expect(result.status).toBe("draft");
@@ -190,7 +235,7 @@ describe("duplicateEvent", () => {
     const original = { ...draftEvent, status: "published", published_at: "2026-09-15T00:00:00.000Z" };
     const newEvent = { ...draftEvent, id: "9d1c9a1a-3333-4a4b-86b7-b559ce4c4530", status: "draft", published_at: null, cancelled_at: null };
     const masterListRows = [{ member_id: memberA, added_by: userId }, { member_id: memberB, added_by: userId }];
-    // The insert-new-event call also goes through .single(), so it needs a plain object body too (see createEvent test above).
+
     const { ctx, fetch } = context([res([original]), res(newEvent), res(masterListRows), res(masterListRows)]);
 
     const result = await duplicateEvent(ctx, eventId);

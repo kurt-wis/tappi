@@ -11,7 +11,7 @@ export const eventColumns =
 
 const title = z.string().trim().min(1).max(200);
 const optionalText = z.string().trim().min(1).max(2000).nullable().optional();
-/** Supabase/Postgres timestamptz columns round-trip as full ISO-8601 with an offset. */
+
 const isoDateTime = z.string().datetime({ offset: true });
 
 export const eventStatus = z.enum(["draft", "published", "cancelled", "completed"]);
@@ -56,14 +56,8 @@ export const addMasterListSchema = z.object({
   member_ids: z.array(z.string().uuid()).min(1).max(500),
 }).strict();
 
-/** Postgres error shape returned by supabase-js for both RPC calls and REST queries. */
 type PgError = { code?: string; message: string };
 
-/**
- * Custom SQLSTATEs raised by the publish_event/cancel_event RPCs (see the
- * 20260928130000_events_publish_cancel migration), plus the CHECK-constraint
- * violation Postgres raises naturally when ends_at <= starts_at.
- */
 function throwForEventRpcError(error: PgError): never {
   switch (error.code) {
     case "TP010":
@@ -84,7 +78,6 @@ function throwOnEndsAtViolation(error: PgError): never {
   throw error;
 }
 
-/** Scoped existence + status check shared by update/delete/duplicate/master-list mutations. */
 async function fetchEventForMutation(ctx: AuthContext, id: string): Promise<Pick<Event, "id" | "status">> {
   const { data, error } = await ctx.supabase.from("events").select("id,status")
     .eq("org_id", ctx.orgId).eq("id", id).maybeSingle();
@@ -138,7 +131,7 @@ export async function updateEvent(ctx: AuthContext, id: string, input: unknown) 
   if (existing.status !== "draft") throw ApiError.conflict("Only a draft event can be edited");
 
   const { data, error } = await ctx.supabase.from("events").update(changes)
-    .eq("org_id", ctx.orgId).eq("id", id).select(eventColumns).maybeSingle();
+    .eq("org_id", ctx.orgId).eq("id", id).eq("status", "draft").select(eventColumns).maybeSingle();
   if (error) throwOnEndsAtViolation(error);
   if (!data) throw ApiError.notFound("Event not found");
   return data;
@@ -151,12 +144,11 @@ export async function deleteEvent(ctx: AuthContext, id: string) {
   if (existing.status !== "draft") throw ApiError.conflict("Only a draft event can be deleted");
 
   const { error } = await ctx.supabase.from("events").delete()
-    .eq("org_id", ctx.orgId).eq("id", id);
+    .eq("org_id", ctx.orgId).eq("id", id).eq("status", "draft");
   if (error) throw error;
   return { id };
 }
 
-/** Clones an event's fields and master list into a new draft event; published_at/cancelled_at are cleared. */
 export async function duplicateEvent(ctx: AuthContext, id: string) {
   requireRole(ctx, ["officer"]);
   eventId.parse(id);
@@ -222,12 +214,12 @@ export async function cancelEvent(ctx: AuthContext, id: string): Promise<Event> 
   return data as Event;
 }
 
-/** Bulk add; members must belong to the caller's org; already-listed members are skipped, not errored. */
 export async function addToMasterList(ctx: AuthContext, id: string, input: unknown) {
   requireRole(ctx, ["officer"]);
   eventId.parse(id);
   const { member_ids } = addMasterListSchema.parse(input);
-  await fetchEventForMutation(ctx, id);
+  const event = await fetchEventForMutation(ctx, id);
+  if (!["draft", "published"].includes(event.status)) throw ApiError.conflict("The event master list is locked");
 
   const uniqueIds = Array.from(new Set(member_ids));
 
@@ -271,7 +263,8 @@ export async function removeFromMasterList(ctx: AuthContext, id: string, targetM
   requireRole(ctx, ["officer"]);
   eventId.parse(id);
   memberIdSchema.parse(targetMemberId);
-  await fetchEventForMutation(ctx, id);
+  const event = await fetchEventForMutation(ctx, id);
+  if (!["draft", "published"].includes(event.status)) throw ApiError.conflict("The event master list is locked");
 
   const { error } = await ctx.supabase.from("event_master_list").delete()
     .eq("event_id", id).eq("member_id", targetMemberId);

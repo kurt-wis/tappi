@@ -6,7 +6,6 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 const SEED_MARKER = 'tappi-test-org-v1';
 const PASSWORD = 'password123';
 
-// Fixed IDs make retries safe, including a retry after a partially failed run.
 export function seedId(name: string): string {
   const hex = createHash('sha256').update(`${SEED_MARKER}:${name}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
@@ -31,7 +30,7 @@ export const seedMembers = [
   ['Nathan Villanueva', 'BS Business Administration'],
 ].map(([full_name, course], index) => ({
   id: seedId(`member-${index + 1}`),
-  student_number: `2026-${String(index + 1).padStart(4, '0')}`,
+  student_number: `2026${String(index + 1).padStart(4, '0')}`,
   full_name,
   email: `student${index + 1}@test.local`,
   course,
@@ -109,14 +108,14 @@ export async function seed(client: SupabaseClient): Promise<void> {
     }, { onConflict: 'id', ignoreDuplicates: true });
     check(profileError, `Create ${account.role} profile`);
     if (profile && !profile.is_active) {
-      // Restore access only for this verified fixture; preserve its other edits.
+
       const { data: reactivated, error: activationError } = await client.from('profiles')
         .update({ is_active: true }).eq('id', user.id).eq('org_id', orgId)
         .eq('role', account.role).eq('email', account.email).select('id').maybeSingle();
       check(activationError, `Reactivate ${account.role} test profile`);
       if (!reactivated) throw new Error(`Profile ownership changed while reactivating ${account.email}.`);
     }
-    // These are dedicated test accounts; ensure the printed credentials work on reruns.
+
     const { error: passwordError } = await client.auth.admin.updateUserById(user.id, {
       password: PASSWORD, email_confirm: true,
     });
@@ -131,21 +130,28 @@ export async function seed(client: SupabaseClient): Promise<void> {
     if (existing && (existing.org_id !== orgId || existing.student_number !== member.student_number)) {
       throw new Error(`Seed member ID conflict for ${member.student_number}.`);
     }
+    const { card_uid, ...identity } = member;
     const { error } = await client.from('members').upsert({
-      ...member,
+      ...identity,
       org_id: orgId,
-      card_linked_at: member.card_uid ? '2026-09-01T00:00:00.000Z' : null,
-      card_linked_by: member.card_uid ? adminId : null,
     }, { onConflict: 'id', ignoreDuplicates: true });
     check(error, `Create member ${member.student_number}`);
+    if (!existing && card_uid) {
+      const { error: cardError } = await client.rpc('link_member_card', {
+        p_org_id: orgId, p_member_id: member.id, p_card_uid: card_uid, p_officer_id: adminId,
+      });
+      check(cardError, `Link seed card for ${member.student_number}`);
+    }
   }
 
   const eventIds = { draft: seedId('draft-event'), published: seedId('published-event') };
+  let masterListOpen = true;
   for (const status of ['draft', 'published'] as const) {
     const { data: existing, error: lookupError } = await client.from('events')
-      .select('org_id').eq('id', eventIds[status]).maybeSingle();
+      .select('org_id,status').eq('id', eventIds[status]).maybeSingle();
     check(lookupError, `Look up ${status} event`);
     if (existing && existing.org_id !== orgId) throw new Error(`Seed ${status} event ID belongs to another organization.`);
+    if (status === 'published' && existing && !['draft','published'].includes(existing.status)) masterListOpen = false;
     const { error } = await client.from('events').upsert({
       id: eventIds[status], org_id: orgId,
       title: status === 'draft' ? 'Planning Workshop' : 'Student Welcome Assembly',
@@ -157,15 +163,15 @@ export async function seed(client: SupabaseClient): Promise<void> {
     }, { onConflict: 'id', ignoreDuplicates: true });
     check(error, `Create ${status} event`);
   }
-  const { error: masterListError } = await client.from('event_master_list').upsert(
+  const { error: masterListError } = masterListOpen ? await client.from('event_master_list').upsert(
     seedMembers.map((member) => ({ event_id: eventIds.published, member_id: member.id })),
     { onConflict: 'event_id,member_id', ignoreDuplicates: true },
-  );
+  ) : { error: null };
   check(masterListError, 'Populate published event master list');
 }
 
 async function main(): Promise<void> {
-  // Existing shell variables win; .env.local takes precedence over .env.
+
   for (const filename of ['.env.local', '.env']) {
     const path = resolve(process.cwd(), filename);
     if (existsSync(path)) process.loadEnvFile(path);
@@ -179,7 +185,6 @@ async function main(): Promise<void> {
   console.log('Admin login: admin@test.local / password123');
 }
 
-// Works with tsx's CommonJS mode as well as ESM, while allowing test imports.
 if (process.argv[1] && /(?:^|[\\/])scripts[\\/]seed\.(?:ts|js)$/.test(process.argv[1])) {
   main().catch((error: unknown) => {
     console.error('Seed failed:', error instanceof Error ? error.message : 'Unexpected error');

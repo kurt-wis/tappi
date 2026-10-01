@@ -1,17 +1,10 @@
--- =============================================================
--- Tappi — 20261001000000_student_accounts
--- Adds student accounts, OTP verification, and lost-card flags.
--- =============================================================
-
--- 1. Add lost_card_flag to members (per-org flag)
-alter table members 
+alter table members
   add column if not exists lost_card_flag boolean not null default false;
 
-create index if not exists idx_members_lost_card 
-  on members(org_id, lost_card_flag) 
+create index if not exists idx_members_lost_card
+  on members(org_id, lost_card_flag)
   where lost_card_flag = true;
 
--- 2. Create otp_codes table for student signup, activation, and autofill
 create table if not exists otp_codes (
   id          uuid primary key default gen_random_uuid(),
   email       citext not null,
@@ -23,10 +16,9 @@ create table if not exists otp_codes (
   created_at  timestamptz not null default now()
 );
 
-create index if not exists idx_otp_codes_email_purpose 
+create index if not exists idx_otp_codes_email_purpose
   on otp_codes(email, purpose, expires_at);
 
--- 3. RPC to report a lost card (student-facing)
 create or replace function public.report_lost_card(p_member_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -34,7 +26,7 @@ declare
   v_org_id  uuid;
 begin
   select card_uid, org_id into v_old_uid, v_org_id
-  from public.members 
+  from public.members
   where id = p_member_id;
 
   if not found then
@@ -55,14 +47,13 @@ begin
 end;
 $$;
 
--- 4. RPC to resolve a lost card (staff-facing)
 create or replace function public.resolve_lost_card(p_member_id uuid, p_officer_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
   v_org_id uuid;
 begin
-  select org_id into v_org_id 
-  from public.members 
+  select org_id into v_org_id
+  from public.members
   where id = p_member_id;
 
   if not found then
@@ -78,5 +69,4 @@ begin
 end;
 $$;
 
--- 5. RLS for otp_codes (service-role only; no public/anon policies granted)
 alter table public.otp_codes enable row level security;

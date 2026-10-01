@@ -1,12 +1,6 @@
--- =============================================================
--- Tappi — 0001_init
--- Multi-tenant schema: organizations -> profiles/members -> events -> attendance
--- =============================================================
-
 create extension if not exists "pgcrypto";
 create extension if not exists "citext";
 
--- ---------- enums ----------
 create type org_role          as enum ('org_admin', 'officer', 'scanner_operator');
 create type member_status     as enum ('active', 'inactive', 'archived');
 create type event_status      as enum ('draft', 'published', 'cancelled', 'completed');
@@ -16,7 +10,6 @@ create type attendance_status as enum ('present', 'late', 'walk_in', 'absent');
 create type scan_method       as enum ('tap', 'manual', 'offline_sync');
 create type notification_type as enum ('event_reminder', 'absentee_alert', 'late_alert', 'officer_alert');
 
--- ---------- updated_at helper ----------
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -25,9 +18,6 @@ begin
 end;
 $$;
 
--- =============================================================
--- organizations
--- =============================================================
 create table organizations (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
@@ -42,9 +32,6 @@ create trigger trg_organizations_updated_at
   before update on organizations
   for each row execute function set_updated_at();
 
--- =============================================================
--- profiles  (1:1 with auth.users, belongs to one org)
--- =============================================================
 create table profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -62,10 +49,6 @@ create trigger trg_profiles_updated_at
   before update on profiles
   for each row execute function set_updated_at();
 
--- =============================================================
--- members  (students — may or may not have an app account)
--- card_uid = decimal string straight from the USB RFID wedge reader
--- =============================================================
 create table members (
   id              uuid primary key default gen_random_uuid(),
   org_id          uuid not null references organizations(id) on delete cascade,
@@ -84,7 +67,6 @@ create table members (
   unique (org_id, student_number)
 );
 
--- one card = one member per org (partial: allows many NULL card_uids)
 create unique index uq_members_org_card_uid
   on members(org_id, card_uid)
   where card_uid is not null;
@@ -96,9 +78,6 @@ create trigger trg_members_updated_at
   before update on members
   for each row execute function set_updated_at();
 
--- =============================================================
--- events
--- =============================================================
 create table events (
   id                    uuid primary key default gen_random_uuid(),
   org_id                uuid not null references organizations(id) on delete cascade,
@@ -125,9 +104,6 @@ create trigger trg_events_updated_at
   before update on events
   for each row execute function set_updated_at();
 
--- =============================================================
--- event_master_list  (expected attendees)
--- =============================================================
 create table event_master_list (
   event_id   uuid not null references events(id) on delete cascade,
   member_id  uuid not null references members(id) on delete cascade,
@@ -137,9 +113,6 @@ create table event_master_list (
 
 create index idx_eml_member on event_master_list(member_id);
 
--- =============================================================
--- registrations  (public sign-up, may not be a member yet)
--- =============================================================
 create table registrations (
   id              uuid primary key default gen_random_uuid(),
   event_id        uuid not null references events(id) on delete cascade,
@@ -162,9 +135,6 @@ create trigger trg_registrations_updated_at
   before update on registrations
   for each row execute function set_updated_at();
 
--- =============================================================
--- attendance  (one row per member per event)
--- =============================================================
 create table attendance (
   id             uuid primary key default gen_random_uuid(),
   event_id       uuid not null references events(id) on delete cascade,
@@ -174,10 +144,10 @@ create table attendance (
   time_in        timestamptz,
   time_out       timestamptz,
   method         scan_method not null default 'tap',
-  scan_uid       text,                 -- raw card_uid as tapped
-  device_id      text,                 -- which tapper/laptop
+  scan_uid       text,
+  device_id      text,
   scanned_by     uuid references profiles(id) on delete set null,
-  client_scan_id text,                 -- idempotency key for offline sync
+  client_scan_id text,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
   unique (event_id, member_id)
@@ -194,9 +164,6 @@ create trigger trg_attendance_updated_at
   before update on attendance
   for each row execute function set_updated_at();
 
--- =============================================================
--- card_link_audit  (replacement / re-link trail)
--- =============================================================
 create table card_link_audit (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -210,9 +177,6 @@ create table card_link_audit (
 
 create index idx_card_audit_member on card_link_audit(member_id, created_at desc);
 
--- =============================================================
--- audit_logs  (generic)
--- =============================================================
 create table audit_logs (
   id          bigserial primary key,
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -226,9 +190,6 @@ create table audit_logs (
 
 create index idx_audit_logs_org on audit_logs(org_id, created_at desc);
 
--- =============================================================
--- points_ledger
--- =============================================================
 create table points_ledger (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -242,9 +203,6 @@ create table points_ledger (
 
 create index idx_points_member on points_ledger(member_id);
 
--- =============================================================
--- certificates
--- =============================================================
 create table certificates (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -257,9 +215,6 @@ create table certificates (
   unique (event_id, member_id)
 );
 
--- =============================================================
--- notifications
--- =============================================================
 create table notifications (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references organizations(id) on delete cascade,
@@ -274,9 +229,6 @@ create table notifications (
 
 create index idx_notifications_org on notifications(org_id, created_at desc);
 
--- =============================================================
--- devices  (tapper / laptop registration + spare reader inventory)
--- =============================================================
 create table devices (
   id           uuid primary key default gen_random_uuid(),
   org_id       uuid not null references organizations(id) on delete cascade,
@@ -288,9 +240,6 @@ create table devices (
   unique (org_id, device_id)
 );
 
--- =============================================================
--- RLS helpers
--- =============================================================
 create or replace function public.current_org_id()
 returns uuid language sql stable security definer set search_path = public as $$
   select org_id from public.profiles where id = auth.uid()
@@ -301,11 +250,6 @@ returns org_role language sql stable security definer set search_path = public a
   select role from public.profiles where id = auth.uid()
 $$;
 
--- =============================================================
--- RLS policies
--- NOTE: the service-role key bypasses RLS entirely. These policies are the
--- safety net for any anon/user-key access and for the Supabase dashboard.
--- =============================================================
 alter table organizations      enable row level security;
 alter table profiles           enable row level security;
 alter table members            enable row level security;
@@ -320,20 +264,17 @@ alter table certificates       enable row level security;
 alter table notifications      enable row level security;
 alter table devices            enable row level security;
 
--- organizations: read your own, admins update
 create policy org_select on organizations
   for select using (id = current_org_id());
 create policy org_update on organizations
   for update using (id = current_org_id() and current_org_role() = 'org_admin');
 
--- profiles: same-org read; admins write
 create policy profiles_select on profiles
   for select using (org_id = current_org_id());
 create policy profiles_write on profiles
   for all using (org_id = current_org_id() and current_org_role() = 'org_admin')
   with check (org_id = current_org_id() and current_org_role() = 'org_admin');
 
--- generic same-org policy for the rest
 create policy members_all on members
   for all using (org_id = current_org_id()) with check (org_id = current_org_id());
 

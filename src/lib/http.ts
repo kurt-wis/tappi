@@ -16,7 +16,6 @@ export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json({ ok: true, data }, { ...init, headers });
 }
 
-/** A downloadable export (CSV/PDF) instead of the { ok, data } envelope. */
 export function download(file: { filename: string; contentType: string; body: string | Uint8Array }) {
   return new Response(file.body as BodyInit, {
     status: 200,
@@ -47,7 +46,6 @@ export async function readJson(request: Request): Promise<unknown> {
   }
 }
 
-/** Like readJson, but an empty body is {}. Malformed JSON is still a 422, never silently {}. */
 export async function readOptionalJson(request: Request): Promise<unknown> {
   const text = await request.text();
   if (text.trim() === "") return {};
@@ -58,7 +56,6 @@ export async function readOptionalJson(request: Request): Promise<unknown> {
   }
 }
 
-/** Wrap a route handler so thrown errors become clean JSON responses. */
 export function handler<Args extends unknown[]>(
   fn: (...args: Args) => Promise<Response>,
 ) {

@@ -81,6 +81,7 @@ export async function reviewRegistration(
   });
   if (error?.code === "TP053") throw ApiError.notFound("Registration not found");
   if (error?.code === "TP054") throw ApiError.conflict("This registration has already been reviewed");
+  if (error?.code === "TP051") throw ApiError.conflict("Event is not open for registration");
   if (error) throw error;
   return data as RegistrationRow;
 }

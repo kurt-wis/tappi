@@ -1,17 +1,3 @@
--- =============================================================
--- Tappi — Part 6: finalize_event RPC
--- =============================================================
--- Marks absent every master-list member with no attendance row,
--- awards points to attendees, and completes the event.
--- Idempotent: re-running on a completed event returns the existing
--- summary and does not double-award.
---
--- Custom SQLSTATEs:
---   TP030  event not found in this org
---   TP031  event is not published (only 'published' can be finalized)
---   TP032  event has not ended yet (ends_at is in the future)
--- ---------------------------------------------------------------
-
 create or replace function public.finalize_event(
   p_org_id     uuid,
   p_event_id   uuid,
@@ -35,7 +21,6 @@ begin
     raise exception 'Event not found' using errcode = 'TP030';
   end if;
 
-  -- Idempotent: already completed → return existing summary
   if v_event.status = 'completed' then
     select count(*) into v_total_attendees
       from attendance
@@ -65,7 +50,6 @@ begin
     raise exception 'Event has not ended yet' using errcode = 'TP032';
   end if;
 
-  -- 1. Mark absent: on master list, no attendance row yet
   with inserted as (
     insert into attendance (event_id, org_id, member_id, status, method)
     select p_event_id, p_org_id, eml.member_id, 'absent', 'manual'
@@ -79,7 +63,6 @@ begin
   )
   select count(*) into v_absent_marked from inserted;
 
-  -- 2. Award points to attendees (present, late, walk_in — not absent)
   if v_event.points_value > 0 then
     with awarded as (
       insert into points_ledger (org_id, member_id, event_id, points, reason, awarded_by)
@@ -95,13 +78,11 @@ begin
     v_points_awarded := v_points_awarded * v_event.points_value;
   end if;
 
-  -- 3. Count attendees
   select count(*) into v_total_attendees
     from attendance
     where event_id = p_event_id
       and status in ('present', 'late', 'walk_in');
 
-  -- 4. Complete the event
   update events
     set status = 'completed', updated_at = now()
     where id = p_event_id and org_id = p_org_id;

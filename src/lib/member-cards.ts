@@ -6,7 +6,6 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { memberId } from "@/lib/members";
 import type { CardLinkAudit, Member } from "@/types/domain";
 
-/** Raw decimal string the USB RFID wedge reader types, e.g. "2035787938". */
 export const cardUid = z.string().trim().regex(/^\d+$/, "card_uid must be a decimal digit string").min(1).max(32);
 
 export const linkCardSchema = z.object({ card_uid: cardUid }).strict();
@@ -15,16 +14,10 @@ export const replaceCardSchema = z.object({
   reason: z.string().trim().min(1).max(500),
 }).strict();
 
-const cardHistoryColumns = "id,org_id,member_id,old_uid,new_uid,action,officer_id,created_at";
+const cardHistoryColumns = "id,org_id,member_id,old_uid,new_uid,action,officer_id,created_at,reason";
 
-/** Postgres error shape returned by supabase-js for both RPC calls and REST queries. */
 type PgError = { code?: string; message: string };
 
-/**
- * Custom SQLSTATEs raised by the link/replace/unlink RPCs (see the
- * 20260928120000_member_card_linking migration) plus the unique-violation
- * Postgres raises naturally for a UID already taken in the org.
- */
 function throwForCardRpcError(error: PgError): never {
   switch (error.code) {
     case "TP003":
@@ -40,15 +33,14 @@ function throwForCardRpcError(error: PgError): never {
   }
 }
 
-/** Shape a members-table row (as returned by the card RPCs) into the member fields relevant to a card response. */
 function toCardMember(row: Record<string, unknown>): Member {
   const {
     id, org_id, student_number, full_name, email, course, member_role,
-    status, card_uid: uid, card_linked_at, card_linked_by, created_at,
+    status, card_uid: uid, card_linked_at, card_linked_by, created_at, lost_card_flag,
   } = row;
   return {
     id, org_id, student_number, full_name, email, course, member_role,
-    status, card_uid: uid, card_linked_at, card_linked_by, created_at,
+    status, card_uid: uid, card_linked_at, card_linked_by, created_at, lost_card_flag,
   } as Member;
 }
 
@@ -99,7 +91,6 @@ export async function unlinkCard(ctx: AuthContext, id: string): Promise<Member> 
   return toCardMember(data);
 }
 
-/** Readable by any authenticated org member (not officer-gated) — see prompt's suggested behavior. */
 export async function getCardHistory(ctx: AuthContext, id: string): Promise<CardLinkAudit[]> {
   memberId.parse(id);
 

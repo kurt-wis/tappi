@@ -1,18 +1,10 @@
--- =============================================================
--- Tappi — 20261001000100_fix_otp_person_id
--- Corrects otp_codes to reference persons(id) instead of persons(person_id),
--- and updates report_lost_card to operate per-person.
--- =============================================================
-
--- 1. Ensure lost_card_flag exists on members (idempotent)
-alter table members 
+alter table members
   add column if not exists lost_card_flag boolean not null default false;
 
-create index if not exists idx_members_lost_card 
-  on members(org_id, lost_card_flag) 
+create index if not exists idx_members_lost_card
+  on members(org_id, lost_card_flag)
   where lost_card_flag = true;
 
--- 2. Fix otp_codes: drop member_id, add person_id → persons(id)
 do $$
 begin
   if exists (
@@ -27,16 +19,14 @@ begin
     select 1 from information_schema.columns
     where table_name = 'otp_codes' and column_name = 'person_id'
   ) then
-    alter table otp_codes 
+    alter table otp_codes
       add column person_id uuid references persons(id) on delete cascade;
   end if;
 end $$;
 
--- 3. Drop old RPCs
 drop function if exists public.report_lost_card(uuid);
 drop function if exists public.resolve_lost_card(uuid, uuid);
 
--- 4. report_lost_card — per-person across all orgs
 create or replace function public.report_lost_card(p_person_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -64,7 +54,6 @@ begin
 end;
 $$;
 
--- 5. resolve_lost_card — per-org resolve (staff)
 create or replace function public.resolve_lost_card(p_member_id uuid, p_officer_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -87,5 +76,4 @@ begin
 end;
 $$;
 
--- 6. RLS on otp_codes
 alter table public.otp_codes enable row level security;

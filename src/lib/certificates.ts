@@ -12,7 +12,6 @@ export const certificateColumns =
 
 const uuid = z.string().uuid();
 
-/** Omit member_ids to issue to every eligible attendee (present, late or walk-in). */
 export const issueCertificatesSchema = z.object({
   member_ids: z.array(uuid).min(1).max(500).optional(),
 }).strict();
@@ -29,7 +28,6 @@ export type IssueCertificatesSummary = {
 
 type PgError = { code?: string; message: string };
 
-/** Custom SQLSTATEs from the 20260929100000_credits_certificates_reports migration. */
 function throwForCertificateRpcError(error: PgError): never {
   switch (error.code) {
     case "TP040":
@@ -110,14 +108,6 @@ export async function listMemberCertificates(ctx: AuthContext, memberId: string)
   return data ?? [];
 }
 
-// ---------------------------------------------------------------
-// Public verification
-// ---------------------------------------------------------------
-
-/**
- * Accepts the code as printed ("A1B2-C3D4-E5F6-0789"), lowercase, or with
- * spaces/dashes dropped. Returns null for anything that can't be a code.
- */
 export function normalizeCertificateCode(raw: string): string | null {
   const hex = raw.toUpperCase().replace(/[\s-]/g, "");
   if (!/^[0-9A-F]{16}$/.test(hex)) return null;
@@ -143,12 +133,6 @@ type VerificationRow = {
   organizations: { name: string } | null;
 };
 
-/**
- * Unauthenticated (served under /api/public). Discloses only what's printed
- * on the certificate itself — never student number, email, or internal IDs.
- * A revoked certificate still verifies, with valid: false, so a verifier can
- * tell "revoked" apart from "never existed".
- */
 export async function verifyCertificate(rawCode: string): Promise<CertificateVerification> {
   const code = normalizeCertificateCode(rawCode);
   if (!code) throw ApiError.notFound("Certificate not found");

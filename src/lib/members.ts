@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
 import { normalizeStudentNumber } from "@/lib/registration-form";
 
-export const memberColumns = "id,org_id,full_name,student_number,email,course,member_role,card_uid,card_linked_at,status,created_at";
+export const memberColumns = "id,org_id,full_name,student_number,email,course,member_role,card_uid,card_linked_at,status,created_at,lost_card_flag";
 const text = z.string().trim().min(1).max(200);
 const optionalEmail = z.string().trim().email().max(254).nullable().optional();
 const optionalCourse = text.nullable().optional();
@@ -12,7 +12,8 @@ export const memberStatus = z.enum(["active", "inactive", "archived"]);
 export const memberId = z.string().uuid();
 export const createMemberSchema = z.object({
   student_number: z.string().trim().min(1).max(100).nullable()
-    .transform((value) => value === null ? null : normalizeStudentNumber(value)),
+    .transform((value) => value === null ? null : normalizeStudentNumber(value))
+    .refine((value) => value === null || value.length > 0, "Student number cannot be empty after normalization"),
   full_name: text,
   email: optionalEmail,
   course: optionalCourse,
@@ -32,7 +33,6 @@ export const memberQuerySchema = z.object({
   per_page: z.coerce.number().int().min(1).max(1_000_000).default(50).transform((n) => Math.min(n, 200)),
 }).strict();
 
-/** Quote filter syntax; escape SQL wildcards. PostgREST's * wildcard is supported. */
 export function memberSearchFilter(search: string): string {
   const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
   const quoted = `"${pattern.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;

@@ -42,13 +42,14 @@ export const POST = handler(async (request: Request, route: Context) => {
   const normalized = normalizeStudentNumber(body.student_number);
   const admin = supabaseAdmin();
 
-  const { data: event } = await admin
+  const { data: event, error: eventError } = await admin
     .from("events")
     .select("id,org_id,status,slots,walk_in_policy")
     .eq("id", eventId)
     .returns<EventRow[]>()
     .maybeSingle();
 
+  if (eventError) throw eventError;
   if (!event) throw ApiError.notFound("Event not found");
   if (event.status !== "published") throw ApiError.conflict("Event is not open for registration");
 
@@ -56,13 +57,14 @@ export const POST = handler(async (request: Request, route: Context) => {
   let consumedTokenHash: string | null = null;
   if (body.autofillToken) {
     const tokenHash = createHash("sha256").update(body.autofillToken).digest("hex");
-    const { data: session } = await admin
+    const { data: session, error: sessionError } = await admin
       .from("registration_lookup_sessions")
       .select("verified,autofill_token_expires_at,student_number_normalized,event_id,org_id")
       .eq("autofill_token_hash", tokenHash)
       .returns<SessionRow[]>()
       .maybeSingle();
 
+    if (sessionError) throw sessionError;
     if (
       session?.verified &&
       session.student_number_normalized === normalized &&
@@ -73,15 +75,19 @@ export const POST = handler(async (request: Request, route: Context) => {
     ) {
       autofillUsed = true;
       consumedTokenHash = tokenHash;
+    } else {
+      throw ApiError.conflict("Autofill verification expired or does not match this registration");
     }
   }
 
-  const [{ data: orgFields }, { data: eventFields }] = await Promise.all([
+  const [{ data: orgFields, error: orgFieldsError }, { data: eventFields, error: eventFieldsError }] = await Promise.all([
     admin.from("org_form_fields").select("key,label,type,required,options,position")
       .eq("org_id", event.org_id).order("position"),
     admin.from("event_form_fields").select("key,label,type,required,options,position")
       .eq("event_id", eventId).order("position"),
   ]);
+  if (orgFieldsError) throw orgFieldsError;
+  if (eventFieldsError) throw eventFieldsError;
   const answers = buildAnswersSchema([
     ...((orgFields ?? []).map((field) => ({ ...field, source: "org_default" })) as FormField[]),
     ...((eventFields ?? []).map((field) => ({ ...field, source: "event_extra" })) as FormField[]),
@@ -94,6 +100,7 @@ export const POST = handler(async (request: Request, route: Context) => {
     p_email: body.email,
     p_answers: answers,
     p_autofill_used: autofillUsed,
+    p_autofill_token_hash: consumedTokenHash,
   });
 
   if (rErr) {
@@ -103,13 +110,8 @@ export const POST = handler(async (request: Request, route: Context) => {
     if (rErr.code === "TP050") throw ApiError.notFound("Event not found");
     if (rErr.code === "TP051") throw ApiError.conflict("Event is not open for registration");
     if (rErr.code === "TP052") throw ApiError.conflict("Event is full");
+    if (rErr.code === "TP055") throw ApiError.conflict("Autofill verification expired or already used");
     throw rErr;
-  }
-
-  if (consumedTokenHash) {
-    await admin.from("registration_lookup_sessions")
-      .update({ autofill_token_hash: null, autofill_token_expires_at: null })
-      .eq("autofill_token_hash", consumedTokenHash);
   }
 
   return ok({ registration: reg, autofill_used: autofillUsed }, { status: 201 });

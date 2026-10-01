@@ -11,7 +11,6 @@ export type NotificationType =
   | "late_alert"
   | "officer_alert";
 
-/** The raw decimal string the USB RFID wedge reader types, e.g. "2035787938". */
 export type CardUid = string;
 
 export type Member = {
@@ -25,10 +24,10 @@ export type Member = {
   status: MemberStatus;
   card_uid: CardUid | null;
   card_linked_at: string | null;
-  /** Only populated on responses from the card-linking endpoints; omitted from generic member CRUD. */
+
   card_linked_by?: string | null;
   created_at: string;
-  lost_card_flag: boolean; 
+  lost_card_flag: boolean;
 };
 
 export type CardLinkAction = "link" | "relink" | "unlink";
@@ -65,14 +64,12 @@ export type Event = {
   updated_at: string;
 };
 
-/** One row of an event's master list (expected attendees), as returned to the API layer. */
 export type EventMasterListEntry = {
   member_id: string;
   added_at: string;
   added_by: string | null;
 };
 
-/** listMasterList's shape: a master-list row with its member embedded via the Supabase FK join. */
 export type EventMasterListEntryWithMember = EventMasterListEntry & {
   members: Pick<Member, "id" | "full_name" | "student_number" | "email" | "course" | "member_role" | "status">;
 };
@@ -92,13 +89,12 @@ export type Attendance = {
   created_at: string;
 };
 
-/** Result returned by the scan endpoint to the scanner operator screen. */
 export type ScanResult =
   | { outcome: "present" | "late" | "walk_in"; member: Pick<Member, "id" | "full_name" | "student_number">; at: string }
   | { outcome: "duplicate"; member: Pick<Member, "id" | "full_name" | "student_number">; first_seen_at: string }
   | { outcome: "unknown_card"; card_uid: CardUid }
   | { outcome: "not_on_master_list"; member: Pick<Member, "id" | "full_name" | "student_number"> };
-/** points_ledger row. Credits = sum of points; finalize writes reason "event_attendance". */
+
 export type CreditEntry = {
   id: string;
   member_id: string;
@@ -122,7 +118,6 @@ export type Certificate = {
   revoke_reason: string | null;
 };
 
-/** Attendance report rows include master-list members who haven't tapped into a live event yet. */
 export type ReportAttendanceStatus = AttendanceStatus | "not_scanned";
 
 export type AttendanceReportRow = {
@@ -144,7 +139,6 @@ export type AttendanceReportRow = {
   certificate_revoked_at: string | null;
 };
 
-/** Per-member credits + lifetime Tappies + attendance counts. */
 export type MemberSummary = {
   member_id: string;
   student_number: string;
@@ -156,22 +150,20 @@ export type MemberSummary = {
   late: number;
   walk_in: number;
   absent: number;
-  /** present + late + walk_in */
+
   attended: number;
-  /** attended / (attended + absent), or null when the member has no completed-event history. */
+
   attendance_rate: number | null;
   current_tappies: number;
   longest_tappies: number;
   certificates_issued: number;
 };
 
-
-// Add at the bottom of the file
 export type OtpCode = {
   id: string;
   email: string;
   purpose: "signup" | "activation" | "autofill";
-  member_id: string | null;
+  person_id: string | null;
   expires_at: string;
   consumed_at: string | null;
   created_at: string;
@@ -214,5 +206,6 @@ export type StudentOrgSummary = {
 
 export type StudentMeResponse = {
   user_id: string;
+  person_id: string;
   orgs: StudentOrgSummary[];
 };
