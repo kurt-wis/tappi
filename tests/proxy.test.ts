@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({ createServerClient: vi.fn() }));
 vi.mock("@supabase/ssr", () => ({ createServerClient: mocks.createServerClient }));
-import { proxy } from "@/proxy";
+import { config, proxy } from "@/proxy";
 
 type CookieBridge = { getAll: () => unknown[]; setAll: (values: { name: string; value: string; options?: object }[]) => void };
 let cookieBridge: CookieBridge;
@@ -57,13 +57,25 @@ test("expired sessions get API 401 with cookie cleanup preserved", async () => {
   expect(response.cookies.get("session")?.maxAge).toBe(0);
 });
 
-test.each(["/api/auth/login", "/api/auth/me", "/api/public/events", "/login", "/signup"])("public path %s bypasses middleware authentication", async (path) => {
+test.each(["/api/auth/login", "/api/auth/me", "/api/public/events", "/api/health", "/api/cron/notifications", "/login", "/signup"])("public path %s bypasses middleware authentication", async (path) => {
   expect((await proxy(new NextRequest(`http://localhost${path}`))).status).toBe(200);
   expect(mocks.createServerClient).not.toHaveBeenCalled();
 });
 
-test.each(["/api/authentication", "/api/publicity"])("similar path prefix %s cannot bypass authentication", async (path) => {
+test.each(["/api/authentication", "/api/publicity", "/api/healthz", "/api/health-admin", "/api/cronjobs"])("similar path prefix %s cannot bypass authentication", async (path) => {
   getUser.mockResolvedValue({ data: { user: null }, error: null });
   expect((await proxy(new NextRequest(`http://localhost${path}`))).status).toBe(401);
   expect(getUser).toHaveBeenCalledOnce();
+});
+
+test("matcher only skips static assets, so API routes always reach the segment-aware public path check", () => {
+  const [pattern] = config.matcher;
+  expect(pattern).not.toMatch(/api\//);
+  const source = new RegExp(`^${pattern}$`);
+  for (const path of ["/api/health", "/api/healthz", "/api/auth/login", "/api/authentication", "/dashboard"]) {
+    expect(source.test(path)).toBe(true);
+  }
+  for (const path of ["/_next/static/chunk.js", "/_next/image", "/favicon.ico", "/logo.png"]) {
+    expect(source.test(path)).toBe(false);
+  }
 });

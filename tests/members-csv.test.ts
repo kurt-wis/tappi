@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn() }));
 import type { AuthContext } from "@/lib/supabase/server";
 import { exportMembersCsv, importMembers, parseCsv, toCsv } from "@/lib/members-csv";
 

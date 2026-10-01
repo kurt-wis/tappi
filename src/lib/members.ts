@@ -3,6 +3,7 @@ import type { AuthContext } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
 import { normalizeStudentNumber } from "@/lib/registration-form";
+import { recordAudit } from "@/lib/audit";
 
 export const memberColumns = "id,org_id,full_name,student_number,email,course,member_role,card_uid,card_linked_at,status,created_at,lost_card_flag";
 const text = z.string().trim().min(1).max(200);
@@ -67,6 +68,7 @@ export async function createMember(ctx: AuthContext, input: unknown) {
     .insert({ ...member, org_id: ctx.orgId }).select(memberColumns).single();
   if (error?.code === "23505") throw ApiError.conflict("Student number already exists in this organization");
   if (error) throw error;
+  await recordAudit(ctx, { action: "member.created", entity: "members", entity_id: data.id });
   return data;
 }
 
@@ -78,6 +80,10 @@ export async function updateMember(ctx: AuthContext, id: string, input: unknown)
     .eq("org_id", ctx.orgId).eq("id", id).select(memberColumns).maybeSingle();
   if (error) throw error;
   if (!data) throw ApiError.notFound("Member not found");
+  await recordAudit(ctx, {
+    action: changes.status === "archived" ? "member.archived" : "member.updated",
+    entity: "members", entity_id: id, metadata: { fields: Object.keys(changes) },
+  });
   return data;
 }
 

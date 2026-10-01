@@ -3,11 +3,14 @@ import { randomInt } from "node:crypto";
 import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { studentNumberSchema, hashSecret, sendVerificationEmail } from "@/lib/auth/student";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const schema = z.object({ studentNumber: studentNumberSchema, eventId: z.string().uuid() }).strict();
 
 export const POST = handler(async (request: Request) => {
+  await enforceRateLimit(RATE_LIMITS.lookupIp, clientIp(request));
   const { studentNumber, eventId } = schema.parse(await readJson(request));
+  await enforceRateLimit(RATE_LIMITS.lookupStudent, studentNumber);
   const admin = supabaseAdmin();
   const { data: event, error: eventError } = await admin.from("events").select("id,org_id")
     .eq("id", eventId).eq("status", "published").maybeSingle();

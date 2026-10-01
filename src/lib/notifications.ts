@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/http";
 import { env } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole, type AuthContext } from "@/lib/supabase/server";
+import { recordAudit } from "@/lib/audit";
 
 type AttendanceNotice = {
   member_id: string;
@@ -23,7 +24,7 @@ export async function queueAttendanceNotifications(ctx: AuthContext, eventId: st
   }
 
   const { data, error } = await admin.from("attendance")
-    .select("member_id,status,members(email,full_name)").eq("event_id", eventId).or("status.eq.late,status.eq.absent,timing.eq.late");
+    .select("member_id,status,members!attendance_member_id_fkey(email,full_name)").eq("event_id", eventId).or("status.eq.late,status.eq.absent,timing.eq.late");
   if (error) throw error;
   const rows = (data ?? []) as unknown as AttendanceNotice[];
   const notices = rows.flatMap((row) => {
@@ -42,6 +43,7 @@ export async function queueAttendanceNotifications(ctx: AuthContext, eventId: st
   });
   if (insertError) throw insertError;
   if (count === null) throw new Error("Notification insert returned no count");
+  await recordAudit(ctx, { action: "event.notifications_queued", entity: "events", entity_id: eventId, metadata: { queued: count } });
   return { queued: count };
 }
 

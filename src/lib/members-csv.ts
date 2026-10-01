@@ -2,6 +2,7 @@ import type { AuthContext } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
 import { createMemberSchema } from "@/lib/members";
+import { recordAudit } from "@/lib/audit";
 
 export const IMPORT_REQUIRED_COLUMNS = ["student_number", "full_name", "member_role"] as const;
 export const IMPORT_OPTIONAL_COLUMNS = ["email", "course"] as const;
@@ -130,6 +131,10 @@ export async function importMembers(ctx: AuthContext, csvText: string): Promise<
     }
   }
 
+  await recordAudit(ctx, {
+    action: "members.imported", entity: "members",
+    metadata: { created: summary.created, updated: summary.updated, skipped: summary.skipped },
+  });
   return summary;
 }
 

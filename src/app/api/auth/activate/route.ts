@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { handler, ok, readJson } from "@/lib/http";
 import { emailSchema, studentNumberSchema, provisionStudent } from "@/lib/auth/student";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const schema = z.object({
   email: emailSchema, password: z.string().min(8).max(128),
@@ -8,6 +9,7 @@ const schema = z.object({
   verificationToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict();
 export const POST = handler(async (request: Request) => {
+  await enforceRateLimit(RATE_LIMITS.activateIp, clientIp(request));
   const account = await provisionStudent(schema.parse(await readJson(request)), "activation");
   return ok({ activated: true, ...account }, { status: 201 });
 });

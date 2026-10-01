@@ -4,6 +4,7 @@ import type { AuthContext } from "@/lib/supabase/server";
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: () => ({ rpc: mocks.rpc }) }));
+vi.mock("@/lib/audit", async (importOriginal) => ({ ...(await importOriginal<object>()), recordAudit: vi.fn() }));
 
 const { linkCard, replaceCard, unlinkCard, getCardHistory } = await import("@/lib/member-cards");
 

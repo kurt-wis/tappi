@@ -2,6 +2,7 @@ import { ApiError } from "@/lib/http";
 import { requireRole, type AuthContext } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
+import { recordAudit } from "@/lib/audit";
 
 type PgError = { code?: string; message: string };
 
@@ -37,6 +38,7 @@ export async function reconcileEvent(ctx: AuthContext, eventId: string) {
   });
   if (error) throwForFinalizeRpcError(error);
   if (!data) throw new Error("reconcile_event returned no data");
+  await recordAudit(ctx, { action: "event.reconciled", entity: "events", entity_id: eventId });
   return data;
 }
 
@@ -56,5 +58,9 @@ export async function finalizeEvent(
   });
   if (error) throwForFinalizeRpcError(error);
   if (!data) throw new Error("finalize_event returned no data");
-  return data as FinalizeSummary;
+  const summary = data as FinalizeSummary;
+  if (!summary.already_finalized) {
+    await recordAudit(ctx, { action: "event.finalized", entity: "events", entity_id: eventId, metadata: { ...summary } });
+  }
+  return summary;
 }

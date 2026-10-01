@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { memberId as memberIdSchema } from "@/lib/members";
 import { getMemberSummary } from "@/lib/reports";
+import { recordAudit } from "@/lib/audit";
 import type { CreditEntry } from "@/types/domain";
 
 export const creditColumns = "id,member_id,event_id,points,reason,awarded_by,created_at";
@@ -58,5 +59,9 @@ export async function adjustCredits(ctx: AuthContext, id: string, input: unknown
     .insert({ org_id: ctx.orgId, member_id: id, person_id, event_id: null, points, reason, awarded_by: ctx.userId })
     .select(creditColumns).single();
   if (error) throw error;
-  return data as unknown as CreditEntry;
+  const entry = data as unknown as CreditEntry;
+  await recordAudit(ctx, {
+    action: "member.credits_adjusted", entity: "members", entity_id: id, metadata: { entry_id: entry.id, points, reason },
+  });
+  return entry;
 }

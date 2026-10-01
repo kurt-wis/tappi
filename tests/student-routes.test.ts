@@ -4,6 +4,10 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(), rpc: vi.fn(), getUser: vi.fn(), createUser: vi.fn(), deleteUser: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/rate-limit")>(),
+  enforceRateLimit: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth: { getUser: mocks.getUser }, from: mocks.from }),
 }));

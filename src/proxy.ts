@@ -1,11 +1,13 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const PUBLIC_PAGES = ["/login", "/signup"];
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/cron", "/api/public"];
+
+/** Matches whole path segments only, so "/api/authentication" is not treated as "/api/auth". */
 export function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/signup" ||
-    pathname === "/api/auth" || pathname.startsWith("/api/auth/") ||
-    pathname === "/api/cron" || pathname.startsWith("/api/cron/") ||
-    pathname === "/api/public" || pathname.startsWith("/api/public/");
+  return PUBLIC_PAGES.includes(pathname) ||
+    PUBLIC_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export async function proxy(request: NextRequest) {
@@ -55,6 +57,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/health|api/auth|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Static assets only. Public routes are exempted by isPublicPath, which matches whole path segments.
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

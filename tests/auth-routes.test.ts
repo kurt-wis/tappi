@@ -1,5 +1,9 @@
 import { beforeEach, expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/rate-limit")>(),
+  enforceRateLimit: vi.fn(async () => undefined),
+}));
 
 const mocks = vi.hoisted(() => ({
   cookieGet: vi.fn(() => [{ name: "session", value: "old" }]),

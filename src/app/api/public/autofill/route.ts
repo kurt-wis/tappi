@@ -2,6 +2,8 @@ import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { createHash } from "crypto";
+import { resolveEventForm } from "@/lib/event-forms";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   autofillToken: z.string().min(32),
@@ -13,6 +15,7 @@ function hashCode(code: string): string {
 }
 
 export const POST = handler(async (req: Request) => {
+  await enforceRateLimit(RATE_LIMITS.autofillIp, clientIp(req));
   const { autofillToken, eventId } = bodySchema.parse(await readJson(req));
   const admin = supabaseAdmin();
 
@@ -31,7 +34,7 @@ export const POST = handler(async (req: Request) => {
 
   const { data: event, error: eventError } = await admin
     .from("events")
-    .select("id, org_id")
+    .select("id, org_id, form_fields")
     .eq("id", eventId)
     .maybeSingle();
   if (eventError) throw eventError;
@@ -47,12 +50,7 @@ export const POST = handler(async (req: Request) => {
   if (memberError) throw memberError;
   if (!member) throw ApiError.notFound("Member not found");
 
-  const [{ data: orgDefaults, error: orgError }, { data: eventExtras, error: fieldsError }] = await Promise.all([
-    admin.from("org_form_fields").select("*").eq("org_id", event.org_id).order("position"),
-    admin.from("event_form_fields").select("*").eq("event_id", eventId).order("position"),
-  ]);
-  if (orgError) throw orgError;
-  if (fieldsError) throw fieldsError;
+  const form = await resolveEventForm(event.org_id, event.form_fields);
 
   return ok({
     member: {
@@ -61,7 +59,8 @@ export const POST = handler(async (req: Request) => {
       student_number: member.student_number,
       course: member.course,
     },
-    orgDefaults: orgDefaults ?? [],
-    eventExtras: eventExtras ?? [],
+    orgDefaults: form.org_fields,
+    eventExtras: form.event_fields,
+    form_fields: form.fields,
   });
 });

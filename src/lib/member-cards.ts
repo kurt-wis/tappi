@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { memberId } from "@/lib/members";
+import { recordAudit } from "@/lib/audit";
 import type { CardLinkAudit, Member } from "@/types/domain";
 
 export const cardUid = z.string().trim().regex(/^\d+$/, "card_uid must be a decimal digit string").min(1).max(32);
@@ -57,6 +58,7 @@ export async function linkCard(ctx: AuthContext, id: string, input: unknown): Pr
   });
   if (error) throwForCardRpcError(error);
   if (!data) throw ApiError.notFound("Member not found");
+  await recordAudit(ctx, { action: "member.card_linked", entity: "members", entity_id: id, metadata: { card_uid } });
   return toCardMember(data);
 }
 
@@ -74,6 +76,9 @@ export async function replaceCard(ctx: AuthContext, id: string, input: unknown):
   });
   if (error) throwForCardRpcError(error);
   if (!data) throw ApiError.notFound("Member not found");
+  await recordAudit(ctx, {
+    action: "member.card_replaced", entity: "members", entity_id: id, metadata: { new_card_uid, reason },
+  });
   return toCardMember(data);
 }
 
@@ -88,6 +93,7 @@ export async function unlinkCard(ctx: AuthContext, id: string): Promise<Member> 
   });
   if (error) throwForCardRpcError(error);
   if (!data) throw ApiError.notFound("Member not found");
+  await recordAudit(ctx, { action: "member.card_unlinked", entity: "members", entity_id: id });
   return toCardMember(data);
 }
 

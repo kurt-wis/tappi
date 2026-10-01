@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ from: vi.fn(), upsert: vi.fn(), rpc: vi.fn(), emailSend: vi.fn(), push: vi.fn(), update: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: () => ({ from: mocks.from, rpc: mocks.rpc }) }));
+vi.mock("@/lib/audit", async (importOriginal) => ({ ...(await importOriginal<object>()), recordAudit: vi.fn() }));
 vi.mock("resend", () => ({ Resend: class { emails = { send: mocks.emailSend }; } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: mocks.push } }));
 vi.mock("@/lib/env", () => ({ env: { RESEND_API_KEY: "test", EMAIL_FROM: "test@example.test", VAPID_PUBLIC_KEY: "public", VAPID_PRIVATE_KEY: "private", VAPID_SUBJECT: "mailto:test@example.test" } }));

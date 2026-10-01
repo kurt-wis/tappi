@@ -3,9 +3,11 @@ import { randomBytes } from "node:crypto";
 import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hashSecret } from "@/lib/auth/student";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const schema = z.object({ sessionId: z.string().uuid(), otp: z.string().regex(/^\d{6}$/) }).strict();
 export const POST = handler(async (request: Request) => {
+  await enforceRateLimit(RATE_LIMITS.verifyOtpIp, clientIp(request));
   const { sessionId, otp } = schema.parse(await readJson(request));
   const token = randomBytes(32).toString("hex");
   const { data, error } = await supabaseAdmin().rpc("verify_registration_lookup", {

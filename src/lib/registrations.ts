@@ -2,6 +2,8 @@ import { z } from "zod";
 import { ApiError } from "@/lib/http";
 import { requireRole, type AuthContext } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { recordAudit } from "@/lib/audit";
+import type { CustomFormField } from "@/lib/registration-form";
 
 const uuid = z.string().uuid();
 
@@ -15,8 +17,6 @@ export const registrationsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(200).default(50),
 }).strict();
-
-type PgError = { code?: string; message: string };
 
 type RegistrationRow = {
   id: string;
@@ -33,6 +33,8 @@ type RegistrationRow = {
   updated_at: string;
   autofill_used: boolean;
   source: string;
+  answers: Record<string, unknown>;
+  form_snapshot: CustomFormField[];
 };
 
 export async function listRegistrations(ctx: AuthContext, input: unknown) {
@@ -83,5 +85,11 @@ export async function reviewRegistration(
   if (error?.code === "TP054") throw ApiError.conflict("This registration has already been reviewed");
   if (error?.code === "TP051") throw ApiError.conflict("Event is not open for registration");
   if (error) throw error;
-  return data as RegistrationRow;
+  const registration = data as RegistrationRow;
+  await recordAudit(ctx, {
+    action: action === "approve" ? "registration.approved" : "registration.denied",
+    entity: "registrations", entity_id: registrationId,
+    metadata: { event_id: registration.event_id, member_id: registration.member_id },
+  });
+  return registration;
 }

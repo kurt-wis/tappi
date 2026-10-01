@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { handler, ok, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { resolveFormSchema, type FormField } from "@/lib/registration-form";
+import { resolveEventForm } from "@/lib/event-forms";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -18,26 +19,19 @@ type PublicEvent = {
   status: string;
   certificate_enabled: boolean;
   points_value: number;
-};
-
-type EventField = {
-  key: string;
-  label: string;
-  type: string;
-  required: boolean;
-  options: unknown;
-  position: number;
+  form_fields: unknown;
 };
 
 export const GET = handler(async (_request: Request, route: Context) => {
   const { id } = await route.params;
+  if (!z.string().uuid().safeParse(id).success) throw ApiError.notFound("Event not found");
   const admin = supabaseAdmin();
 
   const { data: event, error: eventError } = await admin
     .from("events")
     .select(
       "id,org_id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots," +
-      "walk_in_policy,status,certificate_enabled,points_value",
+      "walk_in_policy,status,certificate_enabled,points_value,form_fields",
     )
     .eq("id", id)
     .returns<PublicEvent[]>()
@@ -56,24 +50,14 @@ export const GET = handler(async (_request: Request, route: Context) => {
     .in("status", ["pending", "approved"]);
 
   if (countError) throw countError;
-  const [{ data: orgDefaults, error: orgError }, { data: eventExtras, error: fieldsError }] = await Promise.all([
-    admin.from("org_form_fields").select("key,label,type,required,options,position")
-      .eq("org_id", event.org_id).order("position").returns<EventField[]>(),
-    admin.from("event_form_fields").select("key,label,type,required,options,position")
-      .eq("event_id", id).order("position").returns<EventField[]>(),
-  ]);
-  if (orgError) throw orgError;
-  if (fieldsError) throw fieldsError;
+  const { fields } = await resolveEventForm(event.org_id, event.form_fields);
 
   const taken = regCount ?? 0;
-  const { org_id: _orgId, ...publicEvent } = event;
+  const { org_id: _orgId, form_fields: _storedFields, ...publicEvent } = event;
   return ok({
     ...publicEvent,
     registrations_count: taken,
     slots_remaining: event.slots !== null ? Math.max(0, event.slots - taken) : null,
-    form_fields: resolveFormSchema(
-      (orgDefaults ?? []).map((field) => ({ ...field, source: "org_default" })) as FormField[],
-      (eventExtras ?? []).map((field) => ({ ...field, source: "event_extra" })) as FormField[],
-    ),
+    form_fields: fields,
   });
 });

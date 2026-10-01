@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeStudentNumber } from "@/lib/registration-form";
 import { getAccount } from "@/lib/auth/account";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const schema = z.object({
   email: z.string().trim().email().max(254).toLowerCase().optional(),
@@ -12,7 +13,10 @@ const schema = z.object({
 }).strict().refine((v) => Boolean(v.email) !== Boolean(v.student_number), "Provide email or student number");
 
 export const POST = handler(async (request: Request) => {
+  await enforceRateLimit(RATE_LIMITS.loginIp, clientIp(request));
   const input = schema.parse(await readJson(request));
+  await enforceRateLimit(RATE_LIMITS.loginAccount,
+    input.email ? `email:${input.email}` : `student:${normalizeStudentNumber(input.student_number!)}`);
   let email = input.email;
   if (!email) {
     const { data, error } = await supabaseAdmin().from("persons").select("email,logins(user_id)")

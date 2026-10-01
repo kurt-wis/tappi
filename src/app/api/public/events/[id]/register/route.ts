@@ -2,7 +2,9 @@ import { handler, ok, readJson, ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { createHash } from "crypto";
-import { buildAnswersSchema, normalizeStudentNumber, type FormField } from "@/lib/registration-form";
+import { buildAnswersSchema, customFields, normalizeStudentNumber } from "@/lib/registration-form";
+import { resolveEventForm } from "@/lib/event-forms";
+import { clientIp, enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   full_name: z.string().trim().min(1).max(200),
@@ -20,6 +22,7 @@ type EventRow = {
   status: string;
   slots: number | null;
   walk_in_policy: string;
+  form_fields: unknown;
 };
 
 type SessionRow = {
@@ -38,13 +41,17 @@ type RegistrationRow = {
 
 export const POST = handler(async (request: Request, route: Context) => {
   const { id: eventId } = await route.params;
+  await enforceRateLimit(RATE_LIMITS.registerIp, clientIp(request));
   const body = bodySchema.parse(await readJson(request));
   const normalized = normalizeStudentNumber(body.student_number);
+  if (!normalized) throw new ApiError("validation_error", "Student number is invalid", 422);
+  if (!z.string().uuid().safeParse(eventId).success) throw ApiError.notFound("Event not found");
+  await enforceRateLimit(RATE_LIMITS.registerStudent, eventId, normalized);
   const admin = supabaseAdmin();
 
   const { data: event, error: eventError } = await admin
     .from("events")
-    .select("id,org_id,status,slots,walk_in_policy")
+    .select("id,org_id,status,slots,walk_in_policy,form_fields")
     .eq("id", eventId)
     .returns<EventRow[]>()
     .maybeSingle();
@@ -80,18 +87,8 @@ export const POST = handler(async (request: Request, route: Context) => {
     }
   }
 
-  const [{ data: orgFields, error: orgFieldsError }, { data: eventFields, error: eventFieldsError }] = await Promise.all([
-    admin.from("org_form_fields").select("key,label,type,required,options,position")
-      .eq("org_id", event.org_id).order("position"),
-    admin.from("event_form_fields").select("key,label,type,required,options,position")
-      .eq("event_id", eventId).order("position"),
-  ]);
-  if (orgFieldsError) throw orgFieldsError;
-  if (eventFieldsError) throw eventFieldsError;
-  const answers = buildAnswersSchema([
-    ...((orgFields ?? []).map((field) => ({ ...field, source: "org_default" })) as FormField[]),
-    ...((eventFields ?? []).map((field) => ({ ...field, source: "event_extra" })) as FormField[]),
-  ]).parse(body.answers);
+  const { fields } = await resolveEventForm(event.org_id, event.form_fields);
+  const answers = buildAnswersSchema(fields).parse(body.answers);
 
   const { data: reg, error: rErr } = await admin.rpc("register_for_event", {
     p_event_id: eventId,
@@ -101,6 +98,7 @@ export const POST = handler(async (request: Request, route: Context) => {
     p_answers: answers,
     p_autofill_used: autofillUsed,
     p_autofill_token_hash: consumedTokenHash,
+    p_form_snapshot: customFields(fields),
   });
 
   if (rErr) {

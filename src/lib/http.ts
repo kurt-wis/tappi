@@ -32,9 +32,10 @@ export function fail(
   message: string,
   status = 400,
   details?: unknown,
+  extraHeaders?: Record<string, string>,
 ) {
   return NextResponse.json({ ok: false, error: { code, message, details } }, {
-    status, headers: { "Cache-Control": "private, no-store" },
+    status, headers: { ...extraHeaders, "Cache-Control": "private, no-store" },
   });
 }
 
@@ -67,7 +68,7 @@ export function handler<Args extends unknown[]>(
         return fail("validation_error", "Invalid request body", 422, err.flatten());
       }
       if (err instanceof ApiError) {
-        return fail(err.code, err.message, err.status, err.details);
+        return fail(err.code, err.message, err.status, err.details, err.headers);
       }
       console.error("[api] unhandled error:", err);
       return fail("internal_error", "Something went wrong", 500);
@@ -81,6 +82,7 @@ export class ApiError extends Error {
     message: string,
     public status = 400,
     public details?: unknown,
+    public headers?: Record<string, string>,
   ) {
     super(message);
   }

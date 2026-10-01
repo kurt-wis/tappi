@@ -4,10 +4,12 @@ import { requireRole } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { memberId as memberIdSchema } from "@/lib/members";
+import { recordAudit } from "@/lib/audit";
+import { formFieldListSchema } from "@/lib/registration-form";
 import type { Event, EventMasterListEntry } from "@/types/domain";
 
 export const eventColumns =
-  "id,org_id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots,walk_in_policy,status,points_value,certificate_enabled,published_at,cancelled_at,created_by,created_at,updated_at";
+  "id,org_id,title,description,venue,starts_at,ends_at,grace_period_minutes,slots,walk_in_policy,status,points_value,certificate_enabled,form_fields,published_at,cancelled_at,created_by,created_at,updated_at";
 
 const title = z.string().trim().min(1).max(200);
 const optionalText = z.string().trim().min(1).max(2000).nullable().optional();
@@ -29,6 +31,7 @@ export const createEventSchema = z.object({
   walk_in_policy: walkInPolicy.default("closed"),
   points_value: z.coerce.number().int().min(0).default(0),
   certificate_enabled: z.boolean().default(false),
+  form_fields: formFieldListSchema.default([]),
 }).strict();
 
 export const updateEventSchema = z.object({
@@ -42,6 +45,7 @@ export const updateEventSchema = z.object({
   walk_in_policy: walkInPolicy.optional(),
   points_value: z.coerce.number().int().min(0).optional(),
   certificate_enabled: z.boolean().optional(),
+  form_fields: formFieldListSchema.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field to update");
 
 export const eventQuerySchema = z.object({
@@ -120,6 +124,7 @@ export async function createEvent(ctx: AuthContext, input: unknown) {
     .insert({ ...event, org_id: ctx.orgId, created_by: ctx.userId, status: "draft" })
     .select(eventColumns).single();
   if (error) throwOnEndsAtViolation(error);
+  await recordAudit(ctx, { action: "event.created", entity: "events", entity_id: data.id, metadata: { title: data.title } });
   return data;
 }
 
@@ -134,6 +139,7 @@ export async function updateEvent(ctx: AuthContext, id: string, input: unknown) 
     .eq("org_id", ctx.orgId).eq("id", id).eq("status", "draft").select(eventColumns).maybeSingle();
   if (error) throwOnEndsAtViolation(error);
   if (!data) throw ApiError.notFound("Event not found");
+  await recordAudit(ctx, { action: "event.updated", entity: "events", entity_id: id, metadata: { fields: Object.keys(changes) } });
   return data;
 }
 
@@ -146,6 +152,7 @@ export async function deleteEvent(ctx: AuthContext, id: string) {
   const { error } = await ctx.supabase.from("events").delete()
     .eq("org_id", ctx.orgId).eq("id", id).eq("status", "draft");
   if (error) throw error;
+  await recordAudit(ctx, { action: "event.deleted", entity: "events", entity_id: id });
   return { id };
 }
 
@@ -170,6 +177,7 @@ export async function duplicateEvent(ctx: AuthContext, id: string) {
     walk_in_policy: original.walk_in_policy,
     points_value: original.points_value,
     certificate_enabled: original.certificate_enabled,
+    form_fields: original.form_fields,
     status: "draft",
     created_by: ctx.userId,
   }).select(eventColumns).single();
@@ -187,6 +195,9 @@ export async function duplicateEvent(ctx: AuthContext, id: string) {
     if (cloneListError) throw cloneListError;
   }
 
+  await recordAudit(ctx, {
+    action: "event.duplicated", entity: "events", entity_id: created.id, metadata: { source_event_id: id },
+  });
   return { ...created, master_list_count: masterList?.length ?? 0 };
 }
 
@@ -199,6 +210,7 @@ export async function publishEvent(ctx: AuthContext, id: string): Promise<Event>
   });
   if (error) throwForEventRpcError(error);
   if (!data) throw ApiError.notFound("Event not found");
+  await recordAudit(ctx, { action: "event.published", entity: "events", entity_id: id });
   return data as Event;
 }
 
@@ -211,6 +223,7 @@ export async function cancelEvent(ctx: AuthContext, id: string): Promise<Event> 
   });
   if (error) throwForEventRpcError(error);
   if (!data) throw ApiError.notFound("Event not found");
+  await recordAudit(ctx, { action: "event.cancelled", entity: "events", entity_id: id });
   return data as Event;
 }
 
@@ -243,6 +256,10 @@ export async function addToMasterList(ctx: AuthContext, id: string, input: unkno
       .insert(rows).select("member_id,added_at,added_by");
     if (insertError) throw insertError;
     added = (inserted ?? []) as EventMasterListEntry[];
+    await recordAudit(ctx, {
+      action: "event.master_list_added", entity: "events", entity_id: id,
+      metadata: { member_ids: added.map((entry) => entry.member_id) },
+    });
   }
 
   return { added, skipped: uniqueIds.filter((memberIdValue) => existingIds.has(memberIdValue)) };
@@ -269,5 +286,8 @@ export async function removeFromMasterList(ctx: AuthContext, id: string, targetM
   const { error } = await ctx.supabase.from("event_master_list").delete()
     .eq("event_id", id).eq("member_id", targetMemberId);
   if (error) throw error;
+  await recordAudit(ctx, {
+    action: "event.master_list_removed", entity: "events", entity_id: id, metadata: { member_id: targetMemberId },
+  });
   return { event_id: id, member_id: targetMemberId };
 }

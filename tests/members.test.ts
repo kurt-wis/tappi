@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn() }));
 import { createClient } from "@supabase/supabase-js";
 import type { AuthContext } from "@/lib/supabase/server";
 import { archiveMember, createMember, getMember, listMembers, updateMember } from "@/lib/members";

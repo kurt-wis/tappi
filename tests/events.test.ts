@@ -4,6 +4,7 @@ import type { AuthContext } from "@/lib/supabase/server";
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), requireAuth: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: () => ({ rpc: mocks.rpc }) }));
+vi.mock("@/lib/audit", async (importOriginal) => ({ ...(await importOriginal<object>()), recordAudit: vi.fn() }));
 vi.mock("@/lib/supabase/server", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/supabase/server")>(),
   requireAuth: mocks.requireAuth,

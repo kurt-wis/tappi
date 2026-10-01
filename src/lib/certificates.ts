@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { memberId as memberIdSchema } from "@/lib/members";
 import { eventId as eventIdSchema } from "@/lib/events";
+import { recordAudit } from "@/lib/audit";
 import type { Certificate } from "@/types/domain";
 
 export const certificateColumns =
@@ -58,7 +59,12 @@ export async function issueCertificates(ctx: AuthContext, eventId: string, input
   });
   if (error) throwForCertificateRpcError(error);
   if (!data) throw new Error("issue_certificates returned no data");
-  return data as IssueCertificatesSummary;
+  const summary = data as IssueCertificatesSummary;
+  await recordAudit(ctx, {
+    action: "certificates.issued", entity: "events", entity_id: eventId,
+    metadata: { issued: summary.issued, reinstated: summary.reinstated, member_ids: member_ids ?? null },
+  });
+  return summary;
 }
 
 export async function revokeCertificate(ctx: AuthContext, certificateId: string, input: unknown): Promise<Certificate> {
@@ -74,11 +80,17 @@ export async function revokeCertificate(ctx: AuthContext, certificateId: string,
   });
   if (error) throwForCertificateRpcError(error);
   if (!data) throw new Error("revoke_certificate returned no row");
-  return data as Certificate;
+  const certificate = data as Certificate;
+  await recordAudit(ctx, {
+    action: "certificate.revoked", entity: "certificates", entity_id: certificateId,
+    metadata: { event_id: certificate.event_id, member_id: certificate.member_id, reason: reason ?? null },
+  });
+  return certificate;
 }
 
-const certificateWithMember = `${certificateColumns},members(id,full_name,student_number)`;
-const certificateWithEvent = `${certificateColumns},events(id,title,starts_at)`;
+// Explicit FK hints: certificates has both a simple and a composite foreign key to members and events.
+const certificateWithMember = `${certificateColumns},members!certificates_member_id_fkey(id,full_name,student_number)`;
+const certificateWithEvent = `${certificateColumns},events!certificates_event_id_fkey(id,title,starts_at)`;
 
 export async function listEventCertificates(ctx: AuthContext, eventId: string) {
   eventIdSchema.parse(eventId);
@@ -138,7 +150,7 @@ export async function verifyCertificate(rawCode: string): Promise<CertificateVer
   if (!code) throw ApiError.notFound("Certificate not found");
 
   const { data, error } = await supabaseAdmin().from("certificates")
-    .select("code,issued_at,revoked_at,members(full_name),events(title,starts_at),organizations(name)")
+    .select("code,issued_at,revoked_at,members!certificates_member_id_fkey(full_name),events!certificates_event_id_fkey(title,starts_at),organizations(name)")
     .eq("code", code).maybeSingle();
   if (error) throw error;
   if (!data) throw ApiError.notFound("Certificate not found");

@@ -1,26 +1,12 @@
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
-import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
-import { citext } from "@electric-sql/pglite/contrib/citext";
-import { readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import type { PGlite } from "@electric-sql/pglite";
+import { openTestDb } from "./helpers/pglite";
 
-const db = new PGlite({ extensions: { pgcrypto, citext } });
-const migrationsDir = resolve(process.cwd(), "supabase/migrations");
+let db: PGlite;
 
 beforeAll(async () => {
-  await db.exec(`
-    create role anon nologin;
-    create role authenticated nologin;
-    create role service_role nologin bypassrls;
-    create schema auth;
-    create table auth.users(id uuid primary key, email text);
-    create function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
-  `);
-  for (const filename of readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
-    await db.exec(readFileSync(resolve(migrationsDir, filename), "utf8"));
-  }
-}, 60_000);
+  db = await openTestDb();
+});
 
 afterAll(async () => db.close());
 

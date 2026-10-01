@@ -1,3 +1,5 @@
+import type { FormFieldDefinition } from "@/lib/registration-form";
+
 export type OrgRole = "org_admin" | "officer" | "scanner_operator";
 export type MemberStatus = "active" | "inactive" | "archived";
 export type EventStatus = "draft" | "published" | "cancelled" | "completed";
@@ -57,6 +59,7 @@ export type Event = {
   status: EventStatus;
   points_value: number;
   certificate_enabled: boolean;
+  form_fields: FormFieldDefinition[];
   published_at: string | null;
   cancelled_at: string | null;
   created_by: string | null;
@@ -208,4 +211,34 @@ export type StudentMeResponse = {
   user_id: string;
   person_id: string;
   orgs: StudentOrgSummary[];
+};
+
+export type DeviceKind = "tapper" | "linking_station" | "spare";
+export type DeviceStatus = "active" | "maintenance" | "retired" | "lost";
+
+export type Device = {
+  id: string;
+  org_id: string;
+  device_id: string;
+  label: string | null;
+  kind: DeviceKind;
+  status: DeviceStatus;
+  notes: string | null;
+  last_seen_at: string | null;
+  registered_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditLogEntry = {
+  id: number;
+  org_id: string;
+  actor_id: string | null;
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  metadata: Record<string, unknown>;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
 };
