@@ -28,6 +28,7 @@ export type Member = {
   /** Only populated on responses from the card-linking endpoints; omitted from generic member CRUD. */
   card_linked_by?: string | null;
   created_at: string;
+  lost_card_flag: boolean; 
 };
 
 export type CardLinkAction = "link" | "relink" | "unlink";
@@ -162,4 +163,56 @@ export type MemberSummary = {
   current_tappies: number;
   longest_tappies: number;
   certificates_issued: number;
+};
+
+
+// Add at the bottom of the file
+export type OtpCode = {
+  id: string;
+  email: string;
+  purpose: "signup" | "activation" | "autofill";
+  member_id: string | null;
+  expires_at: string;
+  consumed_at: string | null;
+  created_at: string;
+};
+
+export type StudentOrgSummary = {
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  member_id: string;
+  student_number: string | null;
+  full_name: string;
+  email: string | null;
+  lost_card_flag: boolean;
+  tappies: number;
+  credits: number;
+  attendance_summary: {
+    present: number;
+    late: number;
+    walk_in: number;
+    absent: number;
+    attended: number;
+  };
+  attendance_history: Array<{
+    event_id: string;
+    event_title: string;
+    event_starts_at: string;
+    status: string;
+    time_in: string | null;
+    time_out: string | null;
+  }>;
+  certificates: Array<{
+    id: string;
+    event_id: string;
+    event_title: string;
+    code: string;
+    issued_at: string;
+  }>;
+};
+
+export type StudentMeResponse = {
+  user_id: string;
+  orgs: StudentOrgSummary[];
 };
